@@ -1,0 +1,47 @@
+import express from 'express';
+import {
+  uploadProject,
+  importFromGithub,
+  getUserProjects,
+  getProjectById,
+  updateProject,
+  deleteProject,
+  analyzeProject
+} from '../controllers/project.controller.js';
+import { authenticateToken } from '../middleware/auth.js';
+import { uploadMiddleware, handleUploadError } from '../middleware/upload.js';
+import { uploadLimiter } from '../middleware/rateLimiter.js';
+
+const router = express.Router();
+
+// All routes require authentication
+router.use(authenticateToken);
+
+// Upload project (ZIP file)
+router.post(
+  '/upload',
+  uploadLimiter,
+  uploadMiddleware.single('file'),
+  handleUploadError,
+  uploadProject
+);
+
+// Import from GitHub
+router.post('/github', importFromGithub);
+
+// Get all user projects (with pagination)
+router.get('/', getUserProjects);
+
+// Get specific project
+router.get('/:id', getProjectById);
+
+// Update project
+router.patch('/:id', updateProject);
+
+// Delete project
+router.delete('/:id', deleteProject);
+
+// Analyze project structure
+router.get('/:id/analyze', analyzeProject);
+
+export default router;
