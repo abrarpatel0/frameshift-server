@@ -47,3 +47,10 @@ build/
 *.tmp
 *.temp
 .claude/settings.local.json
+FRONTEND_PROMPT.md
+COPY_PASTE_PROMPT.txt
+fix-python.md
+CONVERSION_SUCCESS.md
+SIMPLE_FRONTEND_PROMPT.txt
+TEST_CONVERSION.md
+WINDOWS_SETUP.md

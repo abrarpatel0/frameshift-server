@@ -2,17 +2,24 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
 import logger from './utils/logger.js';
 import errorHandler from './middleware/errorHandler.js';
 import securityHeaders from './middleware/securityHeaders.js';
 import { generalLimiter } from './middleware/rateLimiter.js';
+import { setupWebSocket } from './websocket/wsServer.js';
 
 // Load environment variables
 dotenv.config();
 
-// Create Express app
+// Create Express app and HTTP server
 const app = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 3000;
+
+// Create WebSocket server
+const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Security middleware
 app.use(helmet());
@@ -43,14 +50,17 @@ import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import projectRoutes from './routes/project.routes.js';
 import githubRoutes from './routes/github.routes.js';
+import conversionRoutes from './routes/conversion.routes.js';
 
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/github', githubRoutes);
-// app.use('/api/conversions', conversionRoutes);
-// app.use('/api/reports', reportRoutes);
+app.use('/api/conversions', conversionRoutes);
+
+// Setup WebSocket server
+setupWebSocket(wss);
 
 // 404 handler
 app.use((req, res) => {
@@ -66,8 +76,9 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   logger.info(`🚀 FrameShift server is running on port ${PORT}`);
+  logger.info(`📡 WebSocket server is running on ws://localhost:${PORT}/ws`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
