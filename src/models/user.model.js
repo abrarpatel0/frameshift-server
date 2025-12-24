@@ -43,7 +43,7 @@ export class UserModel {
    */
   static async findById(id) {
     const result = await query(
-      'SELECT id, email, full_name, github_id, github_username, avatar_url, email_verified, created_at, updated_at, last_login FROM users WHERE id = $1',
+      'SELECT id, email, full_name, github_id, github_username, github_access_token, avatar_url, email_verified, created_at, updated_at, last_login FROM users WHERE id = $1',
       [id]
     );
 
@@ -102,6 +102,73 @@ export class UserModel {
       'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
       [id]
     );
+  }
+
+  /**
+   * Link GitHub account to existing user
+   * @param {string} userId - User ID
+   * @param {Object} githubProfile - GitHub profile data
+   * @returns {Promise<Object>} Updated user
+   */
+  static async linkGithubAccount(userId, githubProfile) {
+    const { id: githubId, username, accessToken, avatarUrl } = githubProfile;
+
+    // Check if GitHub ID is already linked to another account
+    const existingGithubUser = await this.findByGithubId(githubId);
+    if (existingGithubUser && existingGithubUser.id !== userId) {
+      const error = new Error('GitHub account already linked to another user');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Update user with GitHub info
+    const result = await query(
+      `UPDATE users
+       SET github_id = $1,
+           github_username = $2,
+           github_access_token = $3,
+           avatar_url = $4,
+           updated_at = NOW()
+       WHERE id = $5
+       RETURNING id, email, full_name, github_id, github_username, avatar_url, email_verified, created_at, updated_at`,
+      [githubId, username, accessToken, avatarUrl, userId]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Unlink GitHub account from user
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Updated user
+   */
+  static async unlinkGithubAccount(userId) {
+    const result = await query(
+      `UPDATE users
+       SET github_id = NULL,
+           github_username = NULL,
+           github_access_token = NULL,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, email, full_name, github_id, github_username, avatar_url, email_verified, created_at, updated_at`,
+      [userId]
+    );
+
+    return result.rows[0];
+  }
+
+  /**
+   * Check if user has GitHub linked
+   * @param {string} userId - User ID
+   * @returns {Promise<boolean>} True if GitHub is linked
+   */
+  static async hasGithubLinked(userId) {
+    const result = await query(
+      'SELECT github_id FROM users WHERE id = $1',
+      [userId]
+    );
+
+    return result.rows[0]?.github_id !== null && result.rows[0]?.github_id !== undefined;
   }
 
   /**

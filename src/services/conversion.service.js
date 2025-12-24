@@ -2,7 +2,9 @@ import { spawn } from 'child_process';
 import path from 'path';
 import ConversionJobModel from '../models/conversionJob.model.js';
 import ReportModel from '../models/report.model.js';
+import UserModel from '../models/user.model.js';
 import storageService from './storage.service.js';
+import emailService from './email.service.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -36,6 +38,16 @@ export class ConversionService {
       // Save report to database
       await this.saveReport(jobId, result.report);
 
+      // Send success email
+      try {
+        const user = await UserModel.findById(userId);
+        const job = await ConversionJobModel.findById(jobId);
+        await emailService.sendConversionCompleteEmail(user, job, result.report);
+      } catch (emailError) {
+        logger.error(`Failed to send completion email for job ${jobId}:`, emailError);
+        // Don't fail the conversion if email fails
+      }
+
       logger.info(`Conversion job ${jobId} completed successfully`);
 
       return {
@@ -49,6 +61,16 @@ export class ConversionService {
 
       // Mark job as failed
       await ConversionJobModel.markAsFailed(jobId, error.message);
+
+      // Send failure email
+      try {
+        const user = await UserModel.findById(userId);
+        const job = await ConversionJobModel.findById(jobId);
+        await emailService.sendConversionFailedEmail(user, job, error.message);
+      } catch (emailError) {
+        logger.error(`Failed to send failure email for job ${jobId}:`, emailError);
+        // Don't fail further if email fails
+      }
 
       throw error;
     }

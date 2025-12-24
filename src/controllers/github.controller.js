@@ -269,3 +269,84 @@ export const pushConvertedProject = asyncHandler(async (req, res) => {
     }
   });
 });
+
+/**
+ * Link GitHub account to existing user account
+ * POST /api/github/link
+ */
+export const linkGithubAccount = asyncHandler(async (req, res) => {
+  const { userId } = req.user;
+  const { code } = req.body;
+
+  if (!code) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        message: 'Authorization code is required'
+      }
+    });
+  }
+
+  // Exchange code for access token and get user profile
+  const githubService = new GitHubService();
+  const accessToken = await githubService.getAccessToken(code);
+  const profile = await githubService.getUserProfile(accessToken);
+
+  // Prepare GitHub profile data
+  const githubProfile = {
+    id: profile.id.toString(),
+    username: profile.login,
+    accessToken: accessToken,
+    avatarUrl: profile.avatar_url
+  };
+
+  // Link GitHub account to user
+  const user = await UserModel.linkGithubAccount(userId, githubProfile);
+
+  res.json({
+    success: true,
+    data: {
+      user
+    },
+    message: 'GitHub account linked successfully'
+  });
+});
+
+/**
+ * Unlink GitHub account from user
+ * DELETE /api/github/unlink
+ */
+export const unlinkGithubAccount = asyncHandler(async (req, res) => {
+  const { userId } = req.user;
+
+  const user = await UserModel.unlinkGithubAccount(userId);
+
+  res.json({
+    success: true,
+    data: {
+      user
+    },
+    message: 'GitHub account unlinked successfully'
+  });
+});
+
+/**
+ * Get GitHub connection status
+ * GET /api/github/status
+ */
+export const getGithubStatus = asyncHandler(async (req, res) => {
+  const { userId } = req.user;
+
+  const isLinked = await UserModel.hasGithubLinked(userId);
+  const user = await UserModel.findById(userId);
+
+  res.json({
+    success: true,
+    data: {
+      isLinked,
+      github_username: user.github_username || null,
+      avatar_url: user.avatar_url || null,
+      canPushToGithub: isLinked
+    }
+  });
+});

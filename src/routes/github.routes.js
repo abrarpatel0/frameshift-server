@@ -3,7 +3,10 @@ import {
   listUserRepos,
   cloneRepository,
   createRepository,
-  pushConvertedProject
+  pushConvertedProject,
+  linkGithubAccount,
+  unlinkGithubAccount,
+  getGithubStatus
 } from '../controllers/github.controller.js';
 import { authenticateToken } from '../middleware/auth.js';
 
@@ -11,6 +14,11 @@ const router = express.Router();
 
 // All routes require authentication
 router.use(authenticateToken);
+
+// GitHub account linking
+router.post('/link', linkGithubAccount);
+router.delete('/unlink', unlinkGithubAccount);
+router.get('/status', getGithubStatus);
 
 // List user's GitHub repositories
 router.get('/repos', listUserRepos);
