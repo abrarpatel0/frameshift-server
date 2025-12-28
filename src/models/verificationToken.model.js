@@ -1,4 +1,4 @@
-import pool from '../../database/config.js';
+import pool from '../config/database.js';
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
 

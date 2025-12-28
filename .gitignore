@@ -24,6 +24,8 @@ yarn-error.log*
 # Storage (user uploads and generated files)
 storage/
 
+test_django_project/
+test_output/
 # OS
 .DS_Store
 Thumbs.db
@@ -54,3 +56,6 @@ CONVERSION_SUCCESS.md
 SIMPLE_FRONTEND_PROMPT.txt
 TEST_CONVERSION.md
 WINDOWS_SETUP.md
+test_conversion_api.js
+test_github_push.js
+test_conversion_quality.py

@@ -10,13 +10,13 @@ export class UserModel {
    * @returns {Promise<Object>} Created user
    */
   static async create(userData) {
-    const { email, password_hash, full_name, github_id, github_username, github_access_token, avatar_url } = userData;
+    const { email, password_hash, full_name, github_id, github_username, github_access_token, avatar_url, auth_provider = 'email' } = userData;
 
     const result = await query(
-      `INSERT INTO users (email, password_hash, full_name, github_id, github_username, github_access_token, avatar_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, email, full_name, github_id, github_username, avatar_url, email_verified, created_at`,
-      [email, password_hash, full_name, github_id, github_username, github_access_token, avatar_url]
+      `INSERT INTO users (email, password_hash, full_name, github_id, github_username, github_access_token, avatar_url, auth_provider)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, email, full_name, github_id, github_username, avatar_url, email_verified, auth_provider, created_at`,
+      [email, password_hash, full_name, github_id, github_username, github_access_token, avatar_url, auth_provider]
     );
 
     return result.rows[0];
@@ -43,7 +43,7 @@ export class UserModel {
    */
   static async findById(id) {
     const result = await query(
-      'SELECT id, email, full_name, github_id, github_username, github_access_token, avatar_url, email_verified, created_at, updated_at, last_login FROM users WHERE id = $1',
+      'SELECT id, email, full_name, github_id, github_username, github_access_token, avatar_url, email_verified, auth_provider, created_at, updated_at, last_login FROM users WHERE id = $1',
       [id]
     );
 
@@ -85,7 +85,7 @@ export class UserModel {
 
     const result = await query(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex}
-       RETURNING id, email, full_name, github_id, github_username, avatar_url, email_verified, created_at, updated_at`,
+       RETURNING id, email, full_name, github_id, github_username, avatar_url, email_verified, auth_provider, created_at, updated_at`,
       values
     );
 

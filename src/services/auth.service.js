@@ -73,11 +73,12 @@ export class AuthService {
     // Hash password
     const password_hash = await this.hashPassword(password);
 
-    // Create user
+    // Create user with email auth provider
     const user = await UserModel.create({
       email,
       password_hash,
       full_name,
+      auth_provider: 'email'
     });
 
     // Generate token
@@ -163,7 +164,7 @@ export class AuthService {
       });
       await UserModel.updateLastLogin(user.id);
     } else {
-      // Create new user
+      // Create new user with GitHub auth provider
       user = await UserModel.create({
         email: email || `${github_username}@github.com`,
         full_name: name || github_username,
@@ -172,6 +173,7 @@ export class AuthService {
         github_access_token: accessToken,
         avatar_url,
         email_verified: true, // GitHub emails are verified
+        auth_provider: 'github'
       });
     }
 

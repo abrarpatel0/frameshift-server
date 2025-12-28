@@ -14,12 +14,24 @@ CREATE TABLE IF NOT EXISTS conversion_jobs (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_conversion_jobs_project_id ON conversion_jobs(project_id);
-CREATE INDEX idx_conversion_jobs_user_id ON conversion_jobs(user_id);
-CREATE INDEX idx_conversion_jobs_status ON conversion_jobs(status);
-CREATE INDEX idx_conversion_jobs_created_at ON conversion_jobs(created_at);
+-- Create indexes only if they don't exist
+CREATE INDEX IF NOT EXISTS idx_conversion_jobs_project_id ON conversion_jobs(project_id);
+CREATE INDEX IF NOT EXISTS idx_conversion_jobs_user_id ON conversion_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_conversion_jobs_status ON conversion_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_conversion_jobs_created_at ON conversion_jobs(created_at);
 
-CREATE TRIGGER update_conversion_jobs_updated_at
-    BEFORE UPDATE ON conversion_jobs
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+-- Create trigger only if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'update_conversion_jobs_updated_at'
+    ) THEN
+        CREATE TRIGGER update_conversion_jobs_updated_at
+        BEFORE UPDATE ON conversion_jobs
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;

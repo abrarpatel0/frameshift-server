@@ -241,33 +241,164 @@ export const createRepository = asyncHandler(async (req, res) => {
 export const pushConvertedProject = asyncHandler(async (req, res) => {
   const { userId } = req.user;
   const { conversionId } = req.params;
-  const { repoName, description, isPrivate, repoUrl } = req.body;
+  const {
+    repoName,
+    description,
+    isPrivate,
+    repoUrl,
+    githubToken  // NEW: Accept personal access token
+  } = req.body;
 
-  // Get user's GitHub access token
-  const user = await UserModel.findById(userId);
+  // Get token from EITHER request body OR user's stored OAuth token
+  let accessToken = githubToken;
 
-  if (!user || !user.github_access_token) {
+  if (!accessToken) {
+    const user = await UserModel.findById(userId);
+    accessToken = user?.github_access_token;
+  }
+
+  // Check if we have ANY token (OAuth or manual)
+  if (!accessToken) {
     return res.status(401).json({
       success: false,
       error: {
-        message: 'GitHub account not connected. Please authenticate with GitHub first.'
+        message: 'GitHub access required. Either link your GitHub account or provide a personal access token.'
       }
     });
   }
 
-  const githubService = new GitHubService(user.github_access_token);
+  // Get conversion job and verify ownership
+  const ConversionJobModel = (await import('../models/conversionJob.model.js')).default;
+  const conversionJob = await ConversionJobModel.findByIdAndUserId(conversionId, userId);
 
-  // TODO: Get conversion job and verify ownership
-  // For now, this is a placeholder that will be completed in Phase 5
+  if (!conversionJob) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        message: 'Conversion job not found or you do not have permission to access it'
+      }
+    });
+  }
 
-  res.json({
-    success: true,
-    message: 'Push to GitHub will be implemented when conversion feature is ready',
-    data: {
-      conversionId,
-      note: 'This endpoint requires conversion job implementation (Phase 5)'
+  // Check if conversion is completed
+  if (conversionJob.status !== 'completed') {
+    return res.status(400).json({
+      success: false,
+      error: {
+        message: `Cannot push incomplete conversion. Current status: ${conversionJob.status}`
+      }
+    });
+  }
+
+  // Check if converted files exist
+  if (!conversionJob.converted_file_path) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        message: 'Converted files not found. Please run conversion again.'
+      }
+    });
+  }
+
+  // Create GitHub service with the token (OAuth or manual)
+  const githubService = new GitHubService(accessToken);
+
+  // Validate token by trying to get user profile
+  try {
+    await githubService.getUserProfile();
+  } catch (error) {
+    logger.error('Invalid GitHub token:', error);
+    return res.status(401).json({
+      success: false,
+      error: {
+        message: 'Invalid GitHub token. Please check your credentials and try again.',
+        details: githubToken ? 'Personal access token is invalid' : 'OAuth token is invalid. Try relinking your GitHub account.'
+      }
+    });
+  }
+
+  try {
+    let targetRepoUrl = repoUrl;
+
+    // If no existing repo URL provided, create a new repository
+    if (!targetRepoUrl) {
+      if (!repoName) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            message: 'Either repoUrl or repoName is required'
+          }
+        });
+      }
+
+      logger.info(`Creating new GitHub repository: ${repoName} for user ${userId}`);
+
+      const newRepo = await githubService.createRepo({
+        name: repoName,
+        description: description || `Flask project converted from Django by FrameShift (Conversion ID: ${conversionId})`,
+        isPrivate: isPrivate !== false // Default to private
+      });
+
+      targetRepoUrl = newRepo.clone_url;
+
+      logger.info(`Repository created successfully: ${newRepo.full_name}`);
+    } else {
+      // Verify the repository exists and user has access
+      const { owner, repo } = GitHubService.parseRepoUrl(repoUrl);
+      const exists = await githubService.repoExists(owner, repo);
+
+      if (!exists) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            message: 'Target repository not found or you do not have access to it'
+          }
+        });
+      }
     }
-  });
+
+    // Push converted project to GitHub
+    logger.info(`Pushing converted project to: ${targetRepoUrl}`);
+
+    await githubService.pushToRepo(
+      conversionJob.converted_file_path,
+      targetRepoUrl,
+      'main'
+    );
+
+    logger.info(`Successfully pushed conversion ${conversionId} to GitHub`);
+
+    res.json({
+      success: true,
+      message: 'Project successfully pushed to GitHub',
+      data: {
+        conversionId,
+        repoUrl: targetRepoUrl,
+        branch: 'main'
+      }
+    });
+  } catch (error) {
+    logger.error(`Failed to push conversion ${conversionId} to GitHub:`, error);
+
+    // Return user-friendly error message
+    let errorMessage = 'Failed to push to GitHub';
+
+    if (error.message.includes('already exists')) {
+      errorMessage = 'Repository name already exists. Please choose a different name.';
+    } else if (error.message.includes('permission')) {
+      errorMessage = 'You do not have permission to push to this repository.';
+    } else if (error.message.includes('authentication')) {
+      errorMessage = 'GitHub authentication failed. Please reconnect your GitHub account.';
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: {
+        message: errorMessage,
+        details: error.message
+      }
+    });
+  }
 });
 
 /**
@@ -337,16 +468,18 @@ export const unlinkGithubAccount = asyncHandler(async (req, res) => {
 export const getGithubStatus = asyncHandler(async (req, res) => {
   const { userId } = req.user;
 
-  const isLinked = await UserModel.hasGithubLinked(userId);
   const user = await UserModel.findById(userId);
+  const hasOAuthToken = !!user.github_access_token;
 
   res.json({
     success: true,
     data: {
-      isLinked,
+      isLinked: hasOAuthToken,  // Kept for backward compatibility
+      hasOAuthToken,  // NEW: Explicitly shows if OAuth token exists
       github_username: user.github_username || null,
       avatar_url: user.avatar_url || null,
-      canPushToGithub: isLinked
+      canPushToGithub: true,  // NEW: Always true! Users can use personal tokens
+      authProvider: user.auth_provider || 'email'  // NEW: How they signed up
     }
   });
 });

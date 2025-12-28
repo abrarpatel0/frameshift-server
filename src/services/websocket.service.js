@@ -3,6 +3,79 @@ import logger from '../utils/logger.js';
 // Store WebSocket clients: userId -> WebSocket connection
 const clients = new Map();
 
+// Store message queues for disconnected clients: userId -> Array of messages
+// Messages are kept for 5 minutes, max 50 messages per user
+const messageQueues = new Map();
+const MAX_QUEUE_SIZE = 50;
+const QUEUE_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Clean up old messages from queue
+ * @param {string} userId - User ID
+ */
+const cleanupOldMessages = (userId) => {
+  const queue = messageQueues.get(userId);
+  if (!queue) return;
+
+  const now = Date.now();
+  const validMessages = queue.filter(item => (now - item.timestamp) < QUEUE_EXPIRY_MS);
+
+  if (validMessages.length === 0) {
+    messageQueues.delete(userId);
+  } else {
+    messageQueues.set(userId, validMessages);
+  }
+};
+
+/**
+ * Add message to queue for disconnected client
+ * @param {string} userId - User ID
+ * @param {Object} message - Message to queue
+ */
+const queueMessage = (userId, message) => {
+  if (!messageQueues.has(userId)) {
+    messageQueues.set(userId, []);
+  }
+
+  const queue = messageQueues.get(userId);
+  queue.push({
+    message,
+    timestamp: Date.now()
+  });
+
+  // Keep only last MAX_QUEUE_SIZE messages
+  if (queue.length > MAX_QUEUE_SIZE) {
+    queue.shift();
+  }
+
+  logger.debug(`Message queued for user ${userId}: ${message.type} (queue size: ${queue.length})`);
+};
+
+/**
+ * Send all queued messages to user
+ * @param {string} userId - User ID
+ * @param {WebSocket} ws - WebSocket connection
+ */
+const sendQueuedMessages = (userId, ws) => {
+  cleanupOldMessages(userId);
+  const queue = messageQueues.get(userId);
+
+  if (!queue || queue.length === 0) return;
+
+  logger.info(`Sending ${queue.length} queued messages to user ${userId}`);
+
+  queue.forEach(item => {
+    try {
+      ws.send(JSON.stringify(item.message));
+    } catch (error) {
+      logger.error(`Failed to send queued message to user ${userId}:`, error);
+    }
+  });
+
+  // Clear the queue after sending
+  messageQueues.delete(userId);
+};
+
 /**
  * Register WebSocket client
  * @param {string} userId - User ID
@@ -11,6 +84,9 @@ const clients = new Map();
 export const registerClient = (userId, ws) => {
   clients.set(userId, ws);
   logger.info(`WebSocket client registered: ${userId}`);
+
+  // Send any queued messages from when client was disconnected
+  sendQueuedMessages(userId, ws);
 };
 
 /**
@@ -36,9 +112,14 @@ export const broadcastToUser = (userId, message) => {
       logger.debug(`Message sent to user ${userId}: ${message.type}`);
     } catch (error) {
       logger.error(`Failed to send message to user ${userId}:`, error);
+      // Queue message if send fails
+      queueMessage(userId, message);
     }
   } else {
-    logger.warn(`Client not connected or not ready: ${userId}`);
+    // Client not connected - queue the message for later delivery
+    // Only log at debug level since this is expected behavior
+    logger.debug(`Client not connected, queueing message for user ${userId}: ${message.type}`);
+    queueMessage(userId, message);
   }
 };
 

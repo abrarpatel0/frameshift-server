@@ -9,5 +9,6 @@ CREATE TABLE IF NOT EXISTS github_repos (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_github_repos_user_id ON github_repos(user_id);
-CREATE INDEX idx_github_repos_conversion_job_id ON github_repos(conversion_job_id);
+-- Create indexes only if they don't exist
+CREATE INDEX IF NOT EXISTS idx_github_repos_user_id ON github_repos(user_id);
+CREATE INDEX IF NOT EXISTS idx_github_repos_conversion_job_id ON github_repos(conversion_job_id);

@@ -10,11 +10,11 @@ CREATE TABLE IF NOT EXISTS verification_tokens (
     used_at TIMESTAMP
 );
 
--- Create indexes for faster lookups
-CREATE INDEX idx_verification_tokens_token ON verification_tokens(token);
-CREATE INDEX idx_verification_tokens_user_id ON verification_tokens(user_id);
-CREATE INDEX idx_verification_tokens_type ON verification_tokens(type);
-CREATE INDEX idx_verification_tokens_expires_at ON verification_tokens(expires_at);
+-- Create indexes only if they don't exist
+CREATE INDEX IF NOT EXISTS idx_verification_tokens_token ON verification_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_verification_tokens_user_id ON verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_verification_tokens_type ON verification_tokens(type);
+CREATE INDEX IF NOT EXISTS idx_verification_tokens_expires_at ON verification_tokens(expires_at);
 
 -- Create function to automatically delete expired tokens
 CREATE OR REPLACE FUNCTION delete_expired_tokens()

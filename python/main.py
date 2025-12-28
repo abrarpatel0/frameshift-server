@@ -13,11 +13,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from python.analyzers.django_analyzer import DjangoAnalyzer
+from python.analyzers.framework_detector import FrameworkDetector
 from python.converters.models_converter import ModelsConverter
 from python.converters.views_converter import ViewsConverter
 from python.converters.urls_converter import URLsConverter
 from python.converters.templates_converter import TemplatesConverter
 from python.report_generators.summary_reporter import SummaryReporter
+from python.services.gemini_verifier import GeminiVerifier
 from python.utils.progress_emitter import ProgressEmitter
 from python.utils.logger import logger
 
@@ -42,10 +44,23 @@ def main():
         logger.info(f"Django project: {args.project_path}")
         logger.info(f"Output path: {args.output_path}")
 
+        # Step 0: Framework Detection (5%)
+        emit_progress(args.job_id, 'detecting_framework', 5, 'Detecting project framework')
+        detector = FrameworkDetector(args.project_path)
+        framework_result = detector.detect()
+        logger.info(f"Detected framework: {framework_result['framework']} (confidence: {framework_result['confidence']})")
+
+        # Check if framework is supported
+        if not framework_result['is_supported']:
+            error_msg = f"Unsupported framework: {framework_result['framework']}. Only Django projects are currently supported."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+
         # Step 1: Analyze Django project (10%)
         emit_progress(args.job_id, 'analyzing', 10, 'Analyzing Django project structure')
         analyzer = DjangoAnalyzer(args.project_path)
         analysis_result = analyzer.analyze()
+        analysis_result['framework_detection'] = framework_result
         logger.info(f"Analysis complete: Found {len(analysis_result.get('apps', []))} Django apps")
 
         # Step 2: Convert Models (30%)
@@ -72,14 +87,30 @@ def main():
         templates_result = templates_converter.convert()
         logger.info(f"Templates conversion complete: {templates_result.get('total_templates', 0)} templates converted")
 
-        # Step 6: AI Verification (90%) - Placeholder for now
+        # Step 6: AI Verification (90%)
         emit_progress(args.job_id, 'verifying', 90, 'Verifying conversion with AI')
+        gemini_verifier = GeminiVerifier(args.gemini_api_key)
+
         verification_result = {
-            'note': 'AI verification will be implemented with Gemini API integration',
-            'gemini_enabled': args.gemini_api_key is not None
+            'enabled': gemini_verifier.enabled,
+            'models_verification': {'enabled': False},
+            'views_verification': {'enabled': False},
+            'ai_summary': {}
         }
-        # TODO: Implement Gemini verification in Phase 6
-        logger.info("AI verification step (placeholder)")
+
+        # Generate AI summary if Gemini is enabled
+        if gemini_verifier.enabled:
+            logger.info("Running Gemini AI verification")
+            ai_summary = gemini_verifier.generate_summary({
+                'models': models_result,
+                'views': views_result,
+                'urls': urls_result,
+                'templates': templates_result
+            })
+            verification_result['ai_summary'] = ai_summary
+            logger.info(f"AI Summary generated: Overall quality {ai_summary.get('overall_quality', 0)}%")
+        else:
+            logger.info("AI verification disabled (Gemini API key not provided or package not installed)")
 
         # Step 7: Generate Report (95%)
         emit_progress(args.job_id, 'generating_report', 95, 'Generating conversion report')

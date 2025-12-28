@@ -17,5 +17,6 @@ CREATE TABLE IF NOT EXISTS reports (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_reports_conversion_job_id ON reports(conversion_job_id);
-CREATE INDEX idx_reports_accuracy_score ON reports(accuracy_score);
+-- Create indexes only if they don't exist
+CREATE INDEX IF NOT EXISTS idx_reports_conversion_job_id ON reports(conversion_job_id);
+CREATE INDEX IF NOT EXISTS idx_reports_accuracy_score ON reports(accuracy_score);

@@ -1,4 +1,4 @@
-import { query } from '../config/database.js';
+import { query } from "../config/database.js";
 
 /**
  * Project model for database operations
@@ -19,14 +19,24 @@ export class ProjectModel {
       file_path,
       size_bytes,
       django_version,
-      structure_detected
+      structure_detected,
     } = projectData;
 
     const result = await query(
       `INSERT INTO projects (user_id, name, description, source_type, source_url, file_path, size_bytes, django_version, structure_detected)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [user_id, name, description, source_type, source_url, file_path, size_bytes, django_version, structure_detected]
+      [
+        user_id,
+        name,
+        description,
+        source_type,
+        source_url,
+        file_path,
+        size_bytes,
+        django_version,
+        structure_detected,
+      ]
     );
 
     return result.rows[0];
@@ -38,10 +48,7 @@ export class ProjectModel {
    * @returns {Promise<Object|null>} Project object or null
    */
   static async findById(id) {
-    const result = await query(
-      'SELECT * FROM projects WHERE id = $1',
-      [id]
-    );
+    const result = await query("SELECT * FROM projects WHERE id = $1", [id]);
 
     return result.rows[0] || null;
   }
@@ -73,7 +80,7 @@ export class ProjectModel {
    */
   static async countByUserId(userId) {
     const result = await query(
-      'SELECT COUNT(*) FROM projects WHERE user_id = $1',
+      "SELECT COUNT(*) FROM projects WHERE user_id = $1",
       [userId]
     );
 
@@ -100,7 +107,7 @@ export class ProjectModel {
     values.push(id);
 
     const result = await query(
-      `UPDATE projects SET ${fields.join(', ')} WHERE id = $${paramIndex}
+      `UPDATE projects SET ${fields.join(", ")} WHERE id = $${paramIndex}
        RETURNING *`,
       values
     );
@@ -114,10 +121,7 @@ export class ProjectModel {
    * @returns {Promise<boolean>} Success status
    */
   static async delete(id) {
-    const result = await query(
-      'DELETE FROM projects WHERE id = $1',
-      [id]
-    );
+    const result = await query("DELETE FROM projects WHERE id = $1", [id]);
 
     return result.rowCount > 0;
   }
@@ -130,7 +134,7 @@ export class ProjectModel {
    */
   static async findByIdAndUserId(id, userId) {
     const result = await query(
-      'SELECT * FROM projects WHERE id = $1 AND user_id = $2',
+      "SELECT * FROM projects WHERE id = $1 AND user_id = $2",
       [id, userId]
     );
 
@@ -149,7 +153,7 @@ export class ProjectModel {
 
     const [projects, total] = await Promise.all([
       this.findByUserId(userId, { limit: pageSize, offset }),
-      this.countByUserId(userId)
+      this.countByUserId(userId),
     ]);
 
     return {
@@ -158,8 +162,8 @@ export class ProjectModel {
         page,
         pageSize,
         total,
-        totalPages: Math.ceil(total / pageSize)
-      }
+        totalPages: Math.ceil(total / pageSize),
+      },
     };
   }
 }
