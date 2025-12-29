@@ -28,7 +28,7 @@ class FileHandler:
     @staticmethod
     def read_file(file_path: str) -> str:
         """
-        Read file contents
+        Read file contents with automatic encoding detection
 
         Args:
             file_path: Path to file
@@ -36,8 +36,23 @@ class FileHandler:
         Returns:
             File contents as string
         """
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
+        # Try UTF-8 first
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except UnicodeDecodeError:
+            # Try other common encodings
+            encodings = ['latin-1', 'cp1252', 'iso-8859-1', 'utf-16']
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        return f.read()
+                except UnicodeDecodeError:
+                    continue
+
+            # If all encodings fail, read as binary and decode with errors='ignore'
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
 
     @staticmethod
     def write_file(file_path: str, content: str):

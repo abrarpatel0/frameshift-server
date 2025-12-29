@@ -1,11 +1,12 @@
-import { Octokit } from '@octokit/rest';
-import axios from 'axios';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import path from 'path';
-import fs from 'fs/promises';
-import githubConfig from '../config/github.js';
-import logger from '../utils/logger.js';
+import { Octokit } from "@octokit/rest";
+import axios from "axios";
+import { exec } from "child_process";
+import { promisify } from "util";
+import path from "path";
+import fs from "fs/promises";
+import fsSync from "fs";
+import githubConfig from "../config/github.js";
+import logger from "../utils/logger.js";
 
 const execAsync = promisify(exec);
 
@@ -30,22 +31,24 @@ export class GitHubService {
         {
           client_id: githubConfig.clientId,
           client_secret: githubConfig.clientSecret,
-          code
+          code,
         },
         {
           headers: {
-            Accept: 'application/json'
-          }
+            Accept: "application/json",
+          },
         }
       );
 
       if (response.data.error) {
-        throw new Error(response.data.error_description || 'Failed to exchange code for token');
+        throw new Error(
+          response.data.error_description || "Failed to exchange code for token"
+        );
       }
 
       return response.data.access_token;
     } catch (error) {
-      logger.error('Failed to exchange code for token:', error);
+      logger.error("Failed to exchange code for token:", error);
       throw error;
     }
   }
@@ -59,7 +62,7 @@ export class GitHubService {
       const { data } = await this.octokit.users.getAuthenticated();
       return data;
     } catch (error) {
-      logger.error('Failed to get user profile:', error);
+      logger.error("Failed to get user profile:", error);
       throw error;
     }
   }
@@ -70,10 +73,11 @@ export class GitHubService {
    */
   async getUserEmails() {
     try {
-      const { data } = await this.octokit.users.listEmailsForAuthenticatedUser();
+      const { data } =
+        await this.octokit.users.listEmailsForAuthenticatedUser();
       return data;
     } catch (error) {
-      logger.error('Failed to get user emails:', error);
+      logger.error("Failed to get user emails:", error);
       return [];
     }
   }
@@ -85,10 +89,12 @@ export class GitHubService {
   async getPrimaryEmail() {
     try {
       const emails = await this.getUserEmails();
-      const primaryEmail = emails.find(email => email.primary && email.verified);
+      const primaryEmail = emails.find(
+        (email) => email.primary && email.verified
+      );
       return primaryEmail ? primaryEmail.email : null;
     } catch (error) {
-      logger.error('Failed to get primary email:', error);
+      logger.error("Failed to get primary email:", error);
       return null;
     }
   }
@@ -101,13 +107,13 @@ export class GitHubService {
   async listUserRepos(options = {}) {
     try {
       const { data } = await this.octokit.repos.listForAuthenticatedUser({
-        sort: options.sort || 'updated',
+        sort: options.sort || "updated",
         per_page: options.perPage || 100,
-        page: options.page || 1
+        page: options.page || 1,
       });
       return data;
     } catch (error) {
-      logger.error('Failed to list repositories:', error);
+      logger.error("Failed to list repositories:", error);
       throw error;
     }
   }
@@ -123,7 +129,7 @@ export class GitHubService {
       const { data } = await this.octokit.repos.get({ owner, repo });
       return data;
     } catch (error) {
-      logger.error('Failed to get repository:', error);
+      logger.error("Failed to get repository:", error);
       throw error;
     }
   }
@@ -141,7 +147,7 @@ export class GitHubService {
 
       // Insert access token into clone URL for private repos
       const cloneUrl = this.accessToken
-        ? repoUrl.replace('https://', `https://${this.accessToken}@`)
+        ? repoUrl.replace("https://", `https://${this.accessToken}@`)
         : repoUrl;
 
       // Clone repository
@@ -151,7 +157,7 @@ export class GitHubService {
       logger.info(`Cloned repository to: ${destinationPath}`);
       return destinationPath;
     } catch (error) {
-      logger.error('Failed to clone repository:', error);
+      logger.error("Failed to clone repository:", error);
       throw new Error(`Failed to clone repository: ${error.message}`);
     }
   }
@@ -165,15 +171,15 @@ export class GitHubService {
     try {
       const { data } = await this.octokit.repos.createForAuthenticatedUser({
         name: options.name,
-        description: options.description || '',
+        description: options.description || "",
         private: options.isPrivate !== false, // Default to private
-        auto_init: options.autoInit || false
+        auto_init: options.autoInit || false,
       });
 
       logger.info(`Created repository: ${data.full_name}`);
       return data;
     } catch (error) {
-      logger.error('Failed to create repository:', error);
+      logger.error("Failed to create repository:", error);
       throw error;
     }
   }
@@ -185,31 +191,46 @@ export class GitHubService {
    * @param {string} branch - Branch name (default: main)
    * @returns {Promise<void>}
    */
-  async pushToRepo(localPath, repoUrl, branch = 'main') {
+  async pushToRepo(localPath, repoUrl, branch = "main") {
     try {
       // Insert access token into repo URL
       const authRepoUrl = this.accessToken
-        ? repoUrl.replace('https://', `https://${this.accessToken}@`)
+        ? repoUrl.replace("https://", `https://${this.accessToken}@`)
         : repoUrl;
 
-      // Initialize git if not already initialized
-      try {
-        await execAsync('git rev-parse --git-dir', { cwd: localPath });
-        logger.info('Git already initialized');
-      } catch {
-        await execAsync('git init', { cwd: localPath });
-        logger.info('Initialized git repository');
+      // Remove any existing .git directory to ensure fresh repository
+      const gitDir = path.join(localPath, ".git");
+      if (fsSync.existsSync(gitDir)) {
+        fsSync.rmSync(gitDir, { recursive: true, force: true });
+        logger.info("Removed existing git repository");
       }
 
+      // Initialize a completely fresh git repository
+      // Use GIT_CEILING_DIRECTORIES to prevent Git from looking at parent directories
+      const gitEnv = {
+        ...process.env,
+        GIT_CEILING_DIRECTORIES: path.dirname(localPath),
+      };
+
+      await execAsync("git init --initial-branch=main", {
+        cwd: localPath,
+        env: gitEnv,
+      });
+      logger.info("Initialized fresh git repository");
+
       // Configure git user (use GitHub's noreply email)
-      await execAsync('git config user.email "frameshift@users.noreply.github.com"', { cwd: localPath });
+      await execAsync(
+        'git config user.email "frameshift@users.noreply.github.com"',
+        { cwd: localPath }
+      );
       await execAsync('git config user.name "FrameShift"', { cwd: localPath });
 
-      // Add all files
-      await execAsync('git add .', { cwd: localPath });
+      // Add all files in the converted project directory ONLY
+      await execAsync("git add -A", { cwd: localPath });
 
       // Commit changes
-      const commitMessage = 'Initial commit: Django to Flask conversion by FrameShift';
+      const commitMessage =
+        "Initial commit: Django to Flask conversion by FrameShift";
       await execAsync(`git commit -m "${commitMessage}"`, { cwd: localPath });
 
       // Set branch name
@@ -217,10 +238,14 @@ export class GitHubService {
 
       // Add remote
       try {
-        await execAsync(`git remote add origin "${authRepoUrl}"`, { cwd: localPath });
+        await execAsync(`git remote add origin "${authRepoUrl}"`, {
+          cwd: localPath,
+        });
       } catch {
         // Remote might already exist, set URL instead
-        await execAsync(`git remote set-url origin "${authRepoUrl}"`, { cwd: localPath });
+        await execAsync(`git remote set-url origin "${authRepoUrl}"`, {
+          cwd: localPath,
+        });
       }
 
       // Push to remote
@@ -228,7 +253,7 @@ export class GitHubService {
 
       logger.info(`Pushed to repository: ${repoUrl}`);
     } catch (error) {
-      logger.error('Failed to push to repository:', error);
+      logger.error("Failed to push to repository:", error);
       throw new Error(`Failed to push to repository: ${error.message}`);
     }
   }
@@ -243,7 +268,7 @@ export class GitHubService {
       // Handle different GitHub URL formats
       const patterns = [
         /github\.com\/([^\/]+)\/([^\/\.]+)(\.git)?$/,
-        /github\.com:([^\/]+)\/([^\/\.]+)(\.git)?$/
+        /github\.com:([^\/]+)\/([^\/\.]+)(\.git)?$/,
       ];
 
       for (const pattern of patterns) {
@@ -251,14 +276,14 @@ export class GitHubService {
         if (match) {
           return {
             owner: match[1],
-            repo: match[2]
+            repo: match[2],
           };
         }
       }
 
-      throw new Error('Invalid GitHub repository URL');
+      throw new Error("Invalid GitHub repository URL");
     } catch (error) {
-      logger.error('Failed to parse repository URL:', error);
+      logger.error("Failed to parse repository URL:", error);
       throw error;
     }
   }
@@ -292,7 +317,7 @@ export class GitHubService {
       await this.octokit.repos.delete({ owner, repo });
       logger.info(`Deleted repository: ${owner}/${repo}`);
     } catch (error) {
-      logger.error('Failed to delete repository:', error);
+      logger.error("Failed to delete repository:", error);
       throw error;
     }
   }
