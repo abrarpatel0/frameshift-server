@@ -90,21 +90,6 @@ def main():
         urls_result = urls_converter.convert()
         logger.info(f"URLs conversion complete: {urls_result.get('total_patterns', 0)} patterns converted")
 
-        # Step 5: Convert Templates (80%)
-        emit_progress(args.job_id, 'converting_templates', 80, 'Converting Django templates to Jinja2')
-        templates_converter = TemplatesConverter(args.project_path, args.output_path)
-        templates_result = templates_converter.convert()
-        logger.info(f"Templates conversion complete: {templates_result.get('total_templates', 0)} templates converted")
-
-        # Step 5.3: Copy Static Files (82%)
-        emit_progress(args.job_id, 'copying_static', 82, 'Copying static files (CSS, JS, images)')
-        static_copier = StaticCopier(args.project_path, args.output_path)
-        static_result = static_copier.copy()
-        logger.info(f"Static files copy complete: {static_result.get('total_static_files', 0)} files copied")
-
-        # Step 5.5: Generate Runnable Flask App (85%)
-        emit_progress(args.job_id, 'generating_skeleton', 85, 'Generating runnable Flask application')
-
         # Find actual project directory inside the upload directory
         import os
         project_path = Path(args.project_path)
@@ -118,8 +103,23 @@ def main():
 
         logger.info(f"Using project name: {project_name}")
 
-        # Generate runnable Flask project
+        # Determine Flask project path (this is where everything should go)
         flask_project_path = Path(args.output_path) / project_name
+
+        # Step 5: Convert Templates (80%)
+        emit_progress(args.job_id, 'converting_templates', 80, 'Converting Django templates to Jinja2')
+        templates_converter = TemplatesConverter(args.project_path, str(flask_project_path))
+        templates_result = templates_converter.convert()
+        logger.info(f"Templates conversion complete: {templates_result.get('total_templates', 0)} templates converted")
+
+        # Step 5.3: Copy Static Files (82%)
+        emit_progress(args.job_id, 'copying_static', 82, 'Copying static files (CSS, JS, images)')
+        static_copier = StaticCopier(args.project_path, str(flask_project_path))
+        static_result = static_copier.copy()
+        logger.info(f"Static files copy complete: {static_result.get('total_static_files', 0)} files copied")
+
+        # Step 5.5: Generate Runnable Flask App (85%)
+        emit_progress(args.job_id, 'generating_skeleton', 85, 'Generating runnable Flask application')
         flask_generator = SmartFlaskGenerator(str(flask_project_path), project_name)
         flask_result = flask_generator.generate_all()
         logger.info(f"Generated runnable Flask app with {len(flask_result.get('files_generated', []))} files")

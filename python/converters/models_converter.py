@@ -108,6 +108,9 @@ class ModelsConverter:
         # Step 2: Replace model inheritance
         converted = re.sub(r'\(models\.Model\)', '(db.Model)', converted)
 
+        # Step 2.5: Handle AbstractUser - replace with db.Model + UserMixin and add standard fields
+        converted = self._convert_abstract_user(converted)
+
         # Step 3: Convert each field type
         converted = self._convert_all_fields(converted)
 
@@ -129,12 +132,24 @@ class ModelsConverter:
     def _convert_imports(self, code: str) -> str:
         """Convert Django imports to Flask-SQLAlchemy"""
 
+        # Check if AbstractUser is used
+        has_abstract_user = 'AbstractUser' in code or 'AbstractBaseUser' in code
+
         # Replace Django model imports
-        code = re.sub(
-            r'from django\.db import models\s*\n',
-            'from flask_sqlalchemy import SQLAlchemy\n\ndb = SQLAlchemy()\n',
-            code
-        )
+        if has_abstract_user:
+            code = re.sub(
+                r'from django\.db import models\s*\n',
+                'from flask_sqlalchemy import SQLAlchemy\nfrom flask_login import UserMixin\n\ndb = SQLAlchemy()\n',
+                code
+            )
+            # Replace AbstractUser imports
+            code = re.sub(r'from django\.contrib\.auth\.models import .*\n', '', code)
+        else:
+            code = re.sub(
+                r'from django\.db import models\s*\n',
+                'from flask_sqlalchemy import SQLAlchemy\n\ndb = SQLAlchemy()\n',
+                code
+            )
 
         # Remove other Django imports that won't work in Flask
         django_imports = [
@@ -153,6 +168,52 @@ class ModelsConverter:
                     'message': f'Django import removed: {match.strip()}. May need manual replacement.'
                 })
             code = re.sub(pattern, '', code)
+
+        return code
+
+    def _convert_abstract_user(self, code: str) -> str:
+        """Convert AbstractUser to db.Model + UserMixin with all standard fields"""
+
+        # Check if AbstractUser or AbstractBaseUser is used
+        abstract_user_pattern = r'class\s+(\w+)\s*\((AbstractUser|AbstractBaseUser)\):'
+        match = re.search(abstract_user_pattern, code)
+
+        if not match:
+            return code
+
+        class_name = match.group(1)
+        logger.info(f"Found AbstractUser model: {class_name}, adding standard user fields")
+
+        # Replace AbstractUser with db.Model, UserMixin
+        code = re.sub(abstract_user_pattern, rf'class {class_name}(db.Model, UserMixin):', code)
+
+        # Standard user fields from Django's AbstractUser
+        standard_fields = '''
+    # Standard User Fields (from Django's AbstractUser)
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(254), unique=True, nullable=False)
+    first_name = db.Column(db.String(30))
+    last_name = db.Column(db.String(30))
+    is_active = db.Column(db.Boolean, default=True)
+    is_staff = db.Column(db.Boolean, default=False)
+    is_superuser = db.Column(db.Boolean, default=False)
+    date_joined = db.Column(db.DateTime, default=db.func.now())
+    last_login = db.Column(db.DateTime, nullable=True)
+
+    # Custom fields from your Django model:'''
+
+        # Find the class and insert standard fields
+        class_pattern = rf'(class {class_name}\(db\.Model, UserMixin\):\s*\n)'
+        code = re.sub(class_pattern, rf'\1{standard_fields}\n', code)
+
+        # Remove Django-specific User model fields
+        code = re.sub(r'\s*USERNAME_FIELD\s*=\s*.*\n', '', code)
+        code = re.sub(r'\s*REQUIRED_FIELDS\s*=\s*.*\n', '', code)
+        code = re.sub(r'\s*objects\s*=\s*.*Manager.*\n', '', code)
+
+        logger.info(f"Converted {class_name} from AbstractUser to db.Model + UserMixin with standard fields")
 
         return code
 
