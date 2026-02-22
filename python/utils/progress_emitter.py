@@ -55,5 +55,22 @@ class ProgressEmitter:
         }
         print(json.dumps(output), flush=True)
 
+    @staticmethod
+    def emit_custom(job_id, type_name, data):
+        """
+        Emit custom message
+
+        Args:
+            job_id (str): Conversion job ID
+            type_name (str): Message type
+            data (any): Data payload
+        """
+        output = {
+            'type': type_name,
+            'jobId': job_id,
+            'data': data
+        }
+        print(json.dumps(output), flush=True)
+
 
 __all__ = ['ProgressEmitter']

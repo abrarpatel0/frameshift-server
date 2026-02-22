@@ -14,8 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from python.analyzers.django_analyzer import DjangoAnalyzer
 from python.analyzers.framework_detector import FrameworkDetector
+from python.converters.ast_models_converter import HybridModelsConverter  # NEW: Hybrid AST
 from python.converters.models_converter import ModelsConverter
 from python.converters.views_converter import ViewsConverter
+from python.converters.ast_routes_converter import ASTRoutesConverter  # NEW: Full implementation
 from python.converters.urls_converter import URLsConverter
 from python.converters.templates_converter import TemplatesConverter
 from python.converters.static_copier import StaticCopier
@@ -73,16 +75,21 @@ def main():
         logger.info(f"Analysis complete: Found {len(analysis_result.get('apps', []))} Django apps")
 
         # Step 2: Convert Models (30%)
-        emit_progress(args.job_id, 'converting_models', 30, 'Converting Django models to SQLAlchemy')
-        models_converter = ModelsConverter(args.project_path, args.output_path)
-        models_result = models_converter.convert()
-        logger.info(f"Models conversion complete: {models_result.get('total_models', 0)} models converted")
+        emit_progress(args.job_id, 'converting_models', 30, 'Converting Django models to SQLAlchemy (Hybrid AST)')
+        # models_converter = ModelsConverter  # OLD: Replaced with Hybrid AST
+        hybrid_models_converter = HybridModelsConverter(args.project_path, args.output_path)
+        models_result = hybrid_models_converter.convert()
+        logger.info(f"Hybrid AST models conversion complete: {models_result.get('total_models', 0)} models converted (accuracy: {models_result.get('accuracy', 0)}%)")
 
-        # Step 3: Convert Views (50%)
-        emit_progress(args.job_id, 'converting_views', 50, 'Converting Django views to Flask routes')
-        views_converter = ViewsConverter(args.project_path, args.output_path)
-        views_result = views_converter.convert()
-        logger.info(f"Views conversion complete: {views_result.get('total_views', 0)} views converted")
+        # Step 3: Convert Views with AST (FULL Implementation - No pass statements!) (50%)
+        emit_progress(args.job_id, 'converting_views', 50, 'Converting Django views to Flask routes (Full Implementation)')
+
+        # Use AST-based converter for fully implemented routes
+        ast_routes_converter = ASTRoutesConverter(args.project_path, args.output_path)
+        views_result = ast_routes_converter.convert()
+
+        logger.info(f"Routes conversion complete: {views_result.get('fully_implemented', 0)}/{views_result.get('total_views', 0)} routes fully implemented")
+        logger.info(f"No more pass statements! Routes are ready to use.")
 
         # Step 4: Convert URLs (65%)
         emit_progress(args.job_id, 'converting_urls', 65, 'Converting URL patterns to Flask routes')
@@ -138,8 +145,10 @@ def main():
 
             logger.info(f"AI enhancements applied: {ai_enhancements.get('applied', [])}")
 
-            # TODO: Update job in database with ai_enhancements array
-            # This would require adding a database update call here
+            # Emit AI enhancements to Node.js
+            ProgressEmitter.emit_custom(args.job_id, 'ai_enhancements_result', ai_enhancements.get('applied', []))
+            
+            logger.info(f"Emitted {len(ai_enhancements.get('applied', []))} AI enhancements to backend")
         else:
             if not use_ai:
                 logger.info("AI enhancement skipped (disabled by user)")

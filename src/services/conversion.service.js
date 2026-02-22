@@ -168,6 +168,10 @@ export class ConversionService {
               // Store final result
               result = message.data;
               logger.info(`Conversion result received for job ${jobId}`);
+            } else if (message.type === 'ai_enhancements_result') {
+              // Store AI enhancements directly to database
+              await this.handleAIEnhancementsResult(jobId, message.data);
+              logger.info(`AI enhancements recorded for job ${jobId}`);
             } else if (message.type === 'error') {
               errorOutput = message.error;
               logger.error(`Python error for job ${jobId}: ${message.error}`);
@@ -248,6 +252,29 @@ export class ConversionService {
       logger.debug(`Progress updated for job ${jobId}: ${message.progress}% - ${message.step}`);
     } catch (error) {
       logger.error(`Failed to handle progress update for job ${jobId}:`, error);
+    }
+  }
+
+  /**
+   * Handle AI enhancement results from Python
+   * @param {string} jobId - Conversion job ID
+   * @param {Object} aiData - AI enhancement data
+   */
+  static async handleAIEnhancementsResult(jobId, aiData) {
+    try {
+      // Update report with initial AI data if report exists, otherwise store for later
+      // In this architecture, it's safer to update the job model directly if possible,
+      // or store in a temporary way. Assuming we might want to attach this to the eventual report.
+
+      // Since the report is created AT THE END, we can't update it yet.
+      // But we can update the ConversionJob to store this metadata temporarily or permanently.
+      await ConversionJobModel.update(jobId, {
+        ai_enhancements: aiData
+      });
+
+      logger.debug(`AI enhancements stored for job ${jobId}: ${aiData.length} items`);
+    } catch (error) {
+      logger.error(`Failed to handle AI enhancements for job ${jobId}:`, error);
     }
   }
 
@@ -367,10 +394,10 @@ export class ConversionService {
 
           // Determine category from file path
           const category = relativeFilePath.includes('models') ? 'models' :
-                          relativeFilePath.includes('views') ? 'views' :
-                          relativeFilePath.includes('urls') || relativeFilePath.includes('routes') ? 'urls' :
-                          relativeFilePath.includes('forms') ? 'forms' :
-                          'other';
+            relativeFilePath.includes('views') ? 'views' :
+              relativeFilePath.includes('urls') || relativeFilePath.includes('routes') ? 'urls' :
+                relativeFilePath.includes('forms') ? 'forms' :
+                  'other';
 
           // Generate diff
           const diffData = await DiffService.generateFileDiff(originalFile, convertedFile, {
