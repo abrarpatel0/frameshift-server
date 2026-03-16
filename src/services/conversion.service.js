@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import ConversionJobModel from '../models/conversionJob.model.js';
 import ReportModel from '../models/report.model.js';
 import UserModel from '../models/user.model.js';
@@ -8,6 +9,8 @@ import storageService from './storage.service.js';
 import emailService from './email.service.js';
 import DiffService from './diff.service.js';
 import logger from '../utils/logger.js';
+import { decrypt } from '../utils/encryption.js';
+import { normalizeConversionMode } from '../utils/customApiConfig.js';
 
 /**
  * Map to track active Python conversion processes
@@ -27,8 +30,16 @@ export class ConversionService {
    * @param {string} userId - User ID
    * @returns {Promise<Object>} Conversion result
    */
-  static async startConversion(jobId, projectPath, userId, useAI = true) {
-    logger.info(`Starting conversion job ${jobId} (AI: ${useAI ? 'enabled' : 'disabled'})`);
+  static async startConversion(
+    jobId,
+    projectPath,
+    userId,
+    useAI = true,
+    conversionMode = 'default',
+    customApiConfig = null
+  ) {
+    const resolvedMode = normalizeConversionMode(conversionMode);
+    logger.info(`Starting conversion job ${jobId} (AI: ${useAI ? 'enabled' : 'disabled'}, mode: ${resolvedMode})`);
 
     try {
       // Create output directory
@@ -37,8 +48,19 @@ export class ConversionService {
       // Mark job as started
       await ConversionJobModel.markAsStarted(jobId);
 
-      // Spawn Python process with AI flag
-      const result = await this.runPythonConversion(jobId, projectPath, outputPath, useAI);
+      const job = await ConversionJobModel.findById(jobId);
+      const effectiveCustomConfig = customApiConfig || job?.custom_api_config || null;
+      const effectiveMode = normalizeConversionMode(job?.conversion_mode || resolvedMode);
+
+      // Spawn Python process with AI mode/config
+      const result = await this.runPythonConversion(
+        jobId,
+        projectPath,
+        outputPath,
+        useAI,
+        effectiveMode,
+        effectiveCustomConfig
+      );
 
       // Mark job as completed
       await ConversionJobModel.markAsCompleted(jobId, outputPath);
@@ -102,6 +124,15 @@ export class ConversionService {
       return process.env.PYTHON_PATH;
     }
 
+    // Prefer project-local virtual environment when available
+    const localVenvPython = process.platform === 'win32'
+      ? path.join(process.cwd(), 'python', '.venv', 'Scripts', 'python.exe')
+      : path.join(process.cwd(), 'python', '.venv', 'bin', 'python');
+
+    if (fsSync.existsSync(localVenvPython)) {
+      return localVenvPython;
+    }
+
     // On Windows, prefer 'python' over 'python3' (python3 is often the MS Store stub)
     if (process.platform === 'win32') {
       return 'python';
@@ -119,7 +150,14 @@ export class ConversionService {
    * @param {boolean} useAI - Whether to use AI enhancement
    * @returns {Promise<Object>} Conversion result from Python
    */
-  static runPythonConversion(jobId, projectPath, outputPath, useAI = true) {
+  static runPythonConversion(
+    jobId,
+    projectPath,
+    outputPath,
+    useAI = true,
+    conversionMode = 'default',
+    customApiConfig = null
+  ) {
     return new Promise((resolve, reject) => {
       const pythonPath = this.detectPython();
       const scriptPath = path.join(process.cwd(), 'python', 'main.py');
@@ -129,7 +167,8 @@ export class ConversionService {
         '--job-id', jobId,
         '--project-path', projectPath,
         '--output-path', outputPath,
-        '--use-ai', useAI.toString() // Pass AI flag to Python
+        '--use-ai', useAI.toString(),
+        '--conversion-mode', normalizeConversionMode(conversionMode)
       ];
 
       // Add Gemini API key if available
@@ -137,10 +176,24 @@ export class ConversionService {
         args.push('--gemini-api-key', process.env.GEMINI_API_KEY);
       }
 
-      logger.info(`Spawning Python process: ${pythonPath} ${args.join(' ')}`);
+      const pythonEnv = { ...process.env };
+      if (normalizeConversionMode(conversionMode) === 'custom' && customApiConfig) {
+        pythonEnv.CUSTOM_API_PROVIDER = customApiConfig.provider || '';
+        pythonEnv.CUSTOM_API_KEY = customApiConfig.api_key ? decrypt(customApiConfig.api_key) : '';
+        pythonEnv.CUSTOM_API_ENDPOINT = customApiConfig.endpoint || '';
+        pythonEnv.CUSTOM_API_MODEL = customApiConfig.model || '';
+      } else {
+        delete pythonEnv.CUSTOM_API_PROVIDER;
+        delete pythonEnv.CUSTOM_API_KEY;
+        delete pythonEnv.CUSTOM_API_ENDPOINT;
+        delete pythonEnv.CUSTOM_API_MODEL;
+      }
+
+      logger.info(`Spawning Python process for job ${jobId} in ${normalizeConversionMode(conversionMode)} mode`);
 
       const pythonProcess = spawn(pythonPath, args, {
-        cwd: process.cwd()
+        cwd: process.cwd(),
+        env: pythonEnv
       });
 
       // Store process in activeProcesses map for cancellation support
@@ -408,7 +461,10 @@ export class ConversionService {
           });
 
           // Add unique ID
-          diffData.id = `${jobId}-${Buffer.from(relativeFilePath).toString('base64').replace(/=/g, '')}`;
+          const safeFileId = Buffer
+            .from(relativeFilePath)
+            .toString('base64url');
+          diffData.id = `${jobId}-${safeFileId}`;
 
           fileDiffs.push(diffData);
           logger.debug(`Generated diff for ${relativeFilePath}`);

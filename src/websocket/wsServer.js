@@ -7,6 +7,11 @@ import { registerClient, unregisterClient } from '../services/websocket.service.
  * @param {WebSocketServer} wss - WebSocket server instance
  */
 export const setupWebSocket = (wss) => {
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET environment variable is required for WebSocket authentication.');
+  }
+
   wss.on('connection', (ws, req) => {
     try {
       // Extract token from query parameter
@@ -22,7 +27,7 @@ export const setupWebSocket = (wss) => {
       // Verify JWT token
       let decoded;
       try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        decoded = jwt.verify(token, jwtSecret);
       } catch (error) {
         logger.warn('WebSocket connection rejected: Invalid token');
         ws.close(4001, 'Invalid token');
@@ -62,14 +67,14 @@ export const setupWebSocket = (wss) => {
 
       // Handle client disconnect
       ws.on('close', () => {
-        unregisterClient(userId);
+        unregisterClient(userId, ws);
         logger.info(`WebSocket client disconnected: ${userId}`);
       });
 
       // Handle errors
       ws.on('error', (error) => {
         logger.error(`WebSocket error for user ${userId}:`, error);
-        unregisterClient(userId);
+        // Do not unregister here; 'close' will always follow and handles cleanup idempotently.
       });
 
     } catch (error) {

@@ -14,6 +14,7 @@ Uses Astroid for semantic analysis to understand:
 
 import ast
 import astroid
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -29,6 +30,10 @@ class ASTRoutesConverter:
     def __init__(self, django_path: str, output_path: str):
         self.django_path = Path(django_path)
         self.output_path = Path(output_path)
+        self.excluded_dirs = {
+            '.git', '__pycache__', 'node_modules', '.next',
+            'venv', '.venv', 'env', '.idea', '.vscode'
+        }
         self.results = {
             'converted_routes': [],
             'total_views': 0,
@@ -40,8 +45,12 @@ class ASTRoutesConverter:
         """Convert all Django views to Flask routes with full implementation"""
         logger.info("Starting AST-based routes conversion")
 
-        # Find all views.py files
-        views_files = list(self.django_path.rglob('**/views.py'))
+        # Find all views.py files (pruned walk to avoid huge vendor dirs)
+        views_files: List[Path] = []
+        for root, dirs, files in os.walk(self.django_path):
+            dirs[:] = [d for d in dirs if d not in self.excluded_dirs and not d.startswith('.')]
+            if 'views.py' in files:
+                views_files.append(Path(root) / 'views.py')
 
         for views_file in views_files:
             try:

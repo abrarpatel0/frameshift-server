@@ -23,8 +23,25 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Security middleware
 app.use(helmet());
+const allowedOrigins = new Set([
+  'http://localhost:3001',
+  'http://127.0.0.1:3001',
+  process.env.FRONTEND_URL,
+].filter(Boolean));
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+  origin: (origin, callback) => {
+    // Allow non-browser requests (curl/postman) and known frontend origins.
+    if (!origin || allowedOrigins.has(origin)) {
+      return callback(null, true);
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+  },
   credentials: true,
 }));
 app.use(securityHeaders);
@@ -82,6 +99,20 @@ server.listen(PORT, () => {
   logger.info(`🚀 FrameShift server is running on port ${PORT}`);
   logger.info(`📡 WebSocket server is running on ws://localhost:${PORT}/ws`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // Recover from interrupted conversions after server restart.
+  import('./models/conversionJob.model.js')
+    .then(({ default: ConversionJobModel }) =>
+      ConversionJobModel.failOrphanedInProgressJobs()
+    )
+    .then((updatedCount) => {
+      if (updatedCount > 0) {
+        logger.warn(`Marked ${updatedCount} orphaned in-progress conversion job(s) as failed`);
+      }
+    })
+    .catch((error) => {
+      logger.error('Failed to recover orphaned conversion jobs:', error);
+    });
 });
 
 // Graceful shutdown handler

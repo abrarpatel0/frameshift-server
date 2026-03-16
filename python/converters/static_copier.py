@@ -3,6 +3,7 @@ Static Files Copier
 Copies Django static files to Flask static directory
 """
 
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, List
@@ -15,6 +16,10 @@ class StaticCopier:
     def __init__(self, django_path: str, output_path: str):
         self.django_path = Path(django_path)
         self.output_path = Path(output_path)
+        self.excluded_dirs = {
+            '.git', '__pycache__', 'node_modules', '.next',
+            'venv', '.venv', 'env', '.idea', '.vscode'
+        }
         self.results = {
             'copied_files': [],
             'total_static_files': 0,
@@ -49,19 +54,24 @@ class StaticCopier:
         """Find all 'static' directories in Django project"""
         static_dirs = []
 
-        # Common locations for static files in Django
-        for item in self.django_path.rglob('static'):
-            if item.is_dir():
-                static_dirs.append(item)
-                logger.info(f"Found static directory: {item}")
+        for root, dirs, _ in os.walk(self.django_path):
+            dirs[:] = [d for d in dirs if d not in self.excluded_dirs and not d.startswith('.')]
+            if 'static' in dirs:
+                static_dir = Path(root) / 'static'
+                static_dirs.append(static_dir)
+                logger.info(f"Found static directory: {static_dir}")
 
         return static_dirs
 
     def _copy_directory(self, source_dir: Path, dest_dir: Path):
         """Recursively copy a static directory"""
         try:
-            for item in source_dir.rglob('*'):
-                if item.is_file():
+            for root, dirs, files in os.walk(source_dir):
+                dirs[:] = [d for d in dirs if d not in self.excluded_dirs and not d.startswith('.')]
+
+                for filename in files:
+                    item = Path(root) / filename
+
                     # Calculate relative path from source static dir
                     relative_path = item.relative_to(source_dir)
 

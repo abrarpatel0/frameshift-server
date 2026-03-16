@@ -11,6 +11,10 @@ class DjangoAnalyzer:
 
     def __init__(self, project_path: str):
         self.project_path = Path(project_path)
+        self.excluded_dirs = {
+            '.git', '__pycache__', 'node_modules', '.next',
+            'venv', '.venv', 'env', '.idea', '.vscode'
+        }
         self.structure = {
             'apps': [],
             'models': [],
@@ -148,23 +152,22 @@ class DjangoAnalyzer:
         apps = []
 
         # Look for directories containing apps.py or models.py
-        for item in self.project_path.rglob('*'):
-            if item.is_dir() and not any(part.startswith('.') for part in item.parts):
-                app_py = item / 'apps.py'
-                models_py = item / 'models.py'
+        for root, dirs, files in os.walk(self.project_path):
+            dirs[:] = [d for d in dirs if d not in self.excluded_dirs and not d.startswith('.')]
 
-                if app_py.exists() or models_py.exists():
-                    app_info = {
-                        'name': item.name,
-                        'path': str(item),
-                        'has_models': models_py.exists(),
-                        'has_views': (item / 'views.py').exists(),
-                        'has_urls': (item / 'urls.py').exists(),
-                        'has_admin': (item / 'admin.py').exists(),
-                        'has_tests': (item / 'tests.py').exists()
-                    }
-                    apps.append(app_info)
-                    logger.debug(f"Found app: {item.name}")
+            if 'apps.py' in files or 'models.py' in files:
+                item = Path(root)
+                app_info = {
+                    'name': item.name,
+                    'path': str(item),
+                    'has_models': 'models.py' in files,
+                    'has_views': 'views.py' in files,
+                    'has_urls': 'urls.py' in files,
+                    'has_admin': 'admin.py' in files,
+                    'has_tests': 'tests.py' in files
+                }
+                apps.append(app_info)
+                logger.debug(f"Found app: {item.name}")
 
         return apps
 

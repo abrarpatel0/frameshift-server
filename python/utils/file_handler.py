@@ -1,11 +1,19 @@
 import os
 import shutil
+import fnmatch
 from pathlib import Path
 from typing import List, Dict
 
 
 class FileHandler:
     """Utility class for file operations"""
+
+    EXCLUDED_DIRS = {
+        '.git', '.hg', '.svn', '__pycache__',
+        'venv', '.venv', 'env', '.env',
+        'node_modules', '.next', 'dist', 'build',
+        '.idea', '.vscode', '.pytest_cache', '.mypy_cache'
+    }
 
     @staticmethod
     def find_files(directory: str, pattern: str) -> List[Path]:
@@ -19,11 +27,21 @@ class FileHandler:
         Returns:
             List of matching file paths
         """
-        path = Path(directory)
-        if '*' in pattern:
-            return list(path.rglob(pattern))
-        else:
-            return list(path.rglob(pattern))
+        matches: List[Path] = []
+        root_path = Path(directory)
+
+        for root, dirs, files in os.walk(root_path):
+            # Prune expensive/non-project directories
+            dirs[:] = [
+                d for d in dirs
+                if d not in FileHandler.EXCLUDED_DIRS and not d.startswith('.')
+            ]
+
+            for filename in files:
+                if fnmatch.fnmatch(filename, pattern):
+                    matches.append(Path(root) / filename)
+
+        return matches
 
     @staticmethod
     def read_file(file_path: str) -> str:

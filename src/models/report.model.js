@@ -104,6 +104,12 @@ export class ReportModel {
    * @returns {Promise<Object>} Updated report
    */
   static async update(id, updateData) {
+    if (!updateData || Object.keys(updateData).length === 0) {
+      const error = new Error('No valid fields provided for report update');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const fields = [];
     const values = [];
     let paramIndex = 1;

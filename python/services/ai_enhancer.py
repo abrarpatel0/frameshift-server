@@ -3,18 +3,11 @@ AI-Powered Conversion Enhancer using Google Gemini
 Fixes critical issues that regex-based converters miss
 """
 
-import os
 import re
 from pathlib import Path
 from typing import Dict, List
 from ..utils.logger import logger
-
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    logger.warning("google-generativeai not installed. AI features disabled.")
+from ..providers import OpenAIProvider, GeminiProvider, ClaudeProvider, CustomProvider
 
 
 class AIEnhancer:
@@ -23,17 +16,68 @@ class AIEnhancer:
     Focuses on fixing specific high-impact issues
     """
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, provider: str = 'gemini', model: str = None, endpoint: str = None):
         self.api_key = api_key
-        self.enabled = GEMINI_AVAILABLE and api_key
+        self.provider_name = (provider or 'gemini').strip().lower()
+        self.model_name = model
+        self.endpoint = endpoint
         self.enhancements_applied = []
+        self.provider = None
+        self.enabled = bool(api_key)
 
-        if self.enabled:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')  # Using Gemini 2.5 Flash - optimized for coding
-            logger.info("AI Enhancer initialized with Gemini 2.5 Flash")
-        else:
-            logger.warning("AI Enhancer disabled (missing API key or library)")
+        if not self.enabled:
+            logger.warning("AI Enhancer disabled (missing API key)")
+            return
+
+        try:
+            self.provider = self._create_provider()
+            if hasattr(self.provider, 'enabled') and not self.provider.enabled:
+                self.enabled = False
+                logger.warning(f"AI provider '{self.provider_name}' is not ready; enhancer disabled")
+                return
+            logger.info(f"AI Enhancer initialized with provider: {self.provider_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize AI provider '{self.provider_name}': {e}")
+            self.enabled = False
+
+    def _create_provider(self):
+        if self.provider_name == 'openai':
+            if OpenAIProvider is None:
+                raise RuntimeError('OpenAI provider is unavailable in this runtime')
+            return OpenAIProvider(
+                api_key=self.api_key,
+                model=self.model_name or 'gpt-4o',
+                endpoint=self.endpoint or 'https://api.openai.com/v1'
+            )
+
+        if self.provider_name == 'gemini':
+            if GeminiProvider is None:
+                raise RuntimeError('Gemini provider is unavailable in this runtime')
+            return GeminiProvider(
+                api_key=self.api_key,
+                model=self.model_name or 'gemini-2.5-flash',
+                endpoint=self.endpoint
+            )
+
+        if self.provider_name == 'claude':
+            if ClaudeProvider is None:
+                raise RuntimeError('Claude provider is unavailable in this runtime')
+            return ClaudeProvider(
+                api_key=self.api_key,
+                model=self.model_name or 'claude-3-5-sonnet-latest',
+                endpoint=self.endpoint or 'https://api.anthropic.com/v1'
+            )
+
+        if self.provider_name == 'custom':
+            if CustomProvider is None:
+                raise RuntimeError('Custom provider is unavailable in this runtime')
+            return CustomProvider(
+                api_key=self.api_key,
+                model=self.model_name or 'default-model',
+                endpoint=self.endpoint or ''
+            )
+
+        raise ValueError(f"Unsupported AI provider: {self.provider_name}")
 
     def enhance_conversion(self, project_path: Path, models_result: Dict, views_result: Dict) -> Dict:
         """
@@ -136,8 +180,7 @@ IMPORTANT: Return ONLY the fixed Python code. No explanations, no markdown code 
 """
 
         try:
-            response = self.model.generate_content(prompt)
-            fixed_code = response.text.strip()
+            fixed_code = self.provider.generate_conversion(prompt).strip()
 
             # Remove markdown code blocks if present
             fixed_code = re.sub(r'^```python\s*\n?', '', fixed_code)
@@ -146,7 +189,7 @@ IMPORTANT: Return ONLY the fixed Python code. No explanations, no markdown code 
             return fixed_code
 
         except Exception as e:
-            logger.error(f"Gemini API error fixing AbstractUser: {e}")
+            logger.error(f"AI provider error fixing AbstractUser: {e}")
             return None
 
     def _implement_route_logic(self, project_path: Path):
@@ -253,8 +296,7 @@ IMPORTANT: Return ONLY the fixed Python code. No explanations, no markdown code 
 """
 
         try:
-            response = self.model.generate_content(prompt)
-            implemented_code = response.text.strip()
+            implemented_code = self.provider.generate_conversion(prompt).strip()
 
             # Remove markdown code blocks if present
             implemented_code = re.sub(r'^```python\s*\n?', '', implemented_code)
@@ -263,7 +305,7 @@ IMPORTANT: Return ONLY the fixed Python code. No explanations, no markdown code 
             return implemented_code
 
         except Exception as e:
-            logger.error(f"Gemini API error implementing routes: {e}")
+            logger.error(f"AI provider error implementing routes: {e}")
             return None
 
 

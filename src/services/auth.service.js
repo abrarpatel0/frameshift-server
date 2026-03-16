@@ -396,7 +396,7 @@ export class AuthService {
    * @returns {Promise<Object>} User
    */
   static async changePassword(userId, currentPassword, newPassword) {
-    const user = await UserModel.findById(userId);
+    const user = await UserModel.findByIdWithPassword(userId);
 
     if (!user) {
       const error = new Error('User not found');

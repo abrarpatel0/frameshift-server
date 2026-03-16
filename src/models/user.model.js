@@ -58,6 +58,20 @@ export class UserModel {
   }
 
   /**
+   * Find user by ID including password hash (for auth-sensitive operations only)
+   * @param {string} id - User ID
+   * @returns {Promise<Object|null>} User object or null
+   */
+  static async findByIdWithPassword(id) {
+    const result = await query(
+      'SELECT id, email, password_hash, full_name, role, github_id, github_username, github_access_token, avatar_url, email_verified, auth_provider, created_at, updated_at, last_login FROM users WHERE id = $1',
+      [id]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  /**
    * Find user by GitHub ID
    * @param {string} githubId - GitHub user ID
    * @returns {Promise<Object|null>} User object or null
@@ -78,6 +92,12 @@ export class UserModel {
    * @returns {Promise<Object>} Updated user
    */
   static async update(id, updateData) {
+    if (!updateData || Object.keys(updateData).length === 0) {
+      const error = new Error('No valid fields provided for user update');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const fields = [];
     const values = [];
     let paramIndex = 1;

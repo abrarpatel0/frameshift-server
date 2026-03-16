@@ -158,11 +158,13 @@ export const cloneRepository = asyncHandler(async (req, res) => {
 
     // Get directory size
     const size_bytes = await storageService.getDirectorySize(projectPath);
+    const requestedName = name || path.basename(repositoryUrl, '.git');
+    const uniqueName = await ProjectModel.generateUniqueActiveName(userId, requestedName);
 
     // Create project record
     const project = await ProjectModel.create({
       user_id: userId,
-      name: name || path.basename(repositoryUrl, '.git'),
+      name: uniqueName,
       description,
       source_type: 'github',
       source_url: repositoryUrl,
@@ -250,9 +252,12 @@ export const pushConvertedProject = asyncHandler(async (req, res) => {
   const { conversionId } = req.params;
   const {
     repoName,
+    repo_name,
+    create_new,
     description,
     isPrivate,
     repoUrl,
+    repo_url,
     githubToken  // NEW: Accept personal access token
   } = req.body;
 
@@ -325,23 +330,31 @@ export const pushConvertedProject = asyncHandler(async (req, res) => {
   }
 
   try {
-    let targetRepoUrl = repoUrl;
+    const normalizedRepoName = repoName || repo_name;
+    const normalizedRepoUrl = repoUrl || repo_url;
+    const shouldCreateNewRepo = create_new !== undefined
+      ? ['1', 'true', 'yes', true].includes(
+        typeof create_new === 'string' ? create_new.toLowerCase() : create_new
+      )
+      : !normalizedRepoUrl;
+
+    let targetRepoUrl = normalizedRepoUrl;
 
     // If no existing repo URL provided, create a new repository
-    if (!targetRepoUrl) {
-      if (!repoName) {
+    if (shouldCreateNewRepo) {
+      if (!normalizedRepoName) {
         return res.status(400).json({
           success: false,
           error: {
-            message: 'Either repoUrl or repoName is required'
+            message: 'Repository name is required when creating a new repository'
           }
         });
       }
 
-      logger.info(`Creating new GitHub repository: ${repoName} for user ${userId}`);
+      logger.info(`Creating new GitHub repository: ${normalizedRepoName} for user ${userId}`);
 
       const newRepo = await githubService.createRepo({
-        name: repoName,
+        name: normalizedRepoName,
         description: description || `Flask project converted from Django by FrameShift (Conversion ID: ${conversionId})`,
         isPrivate: isPrivate !== false // Default to private
       });
@@ -350,8 +363,17 @@ export const pushConvertedProject = asyncHandler(async (req, res) => {
 
       logger.info(`Repository created successfully: ${newRepo.full_name}`);
     } else {
+      if (!targetRepoUrl) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            message: 'Repository URL is required when pushing to an existing repository'
+          }
+        });
+      }
+
       // Verify the repository exists and user has access
-      const { owner, repo } = GitHubService.parseRepoUrl(repoUrl);
+      const { owner, repo } = GitHubService.parseRepoUrl(targetRepoUrl);
       const exists = await githubService.repoExists(owner, repo);
 
       if (!exists) {
@@ -426,9 +448,9 @@ export const linkGithubAccount = asyncHandler(async (req, res) => {
   }
 
   // Exchange code for access token and get user profile
-  const githubService = new GitHubService();
-  const accessToken = await githubService.getAccessToken(code);
-  const profile = await githubService.getUserProfile(accessToken);
+  const accessToken = await GitHubService.exchangeCodeForToken(code);
+  const githubService = new GitHubService(accessToken);
+  const profile = await githubService.getUserProfile();
 
   // Prepare GitHub profile data
   const githubProfile = {

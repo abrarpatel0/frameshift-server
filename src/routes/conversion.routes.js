@@ -8,6 +8,7 @@ import {
   getConversionReport,
   retryConversion
 } from '../controllers/conversion.controller.js';
+import { validateApiKey } from '../controllers/apiKeyValidation.controller.js';
 import {
   getAllDiffs,
   getFileDiff,
@@ -21,6 +22,9 @@ const router = express.Router();
 
 // All routes require authentication
 router.use(authenticateToken);
+
+// Validate custom API key (must be before /:id routes)
+router.post('/validate-api-key', validateApiKey);
 
 // Start new conversion (with rate limiting)
 router.post('/', conversionLimiter, startConversion);

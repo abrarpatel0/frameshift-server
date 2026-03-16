@@ -1,14 +1,11 @@
 import { Octokit } from "@octokit/rest";
 import axios from "axios";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { execFile } from "child_process";
 import path from "path";
 import fs from "fs/promises";
 import fsSync from "fs";
 import githubConfig from "../config/github.js";
 import logger from "../utils/logger.js";
-
-const execAsync = promisify(exec);
 
 /**
  * GitHub service for OAuth and repository operations
@@ -17,6 +14,58 @@ export class GitHubService {
   constructor(accessToken = null) {
     this.accessToken = accessToken;
     this.octokit = accessToken ? new Octokit({ auth: accessToken }) : null;
+  }
+
+  static sanitizeGithubUrl(repoUrl) {
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(repoUrl);
+    } catch {
+      throw new Error("Invalid GitHub repository URL");
+    }
+
+    if (parsedUrl.protocol !== "https:" || parsedUrl.hostname !== "github.com") {
+      throw new Error("Repository URL must be an HTTPS GitHub URL");
+    }
+
+    return `${parsedUrl.origin}${parsedUrl.pathname}`.replace(/\/$/, "");
+  }
+
+  static validateBranchName(branch) {
+    if (!branch || typeof branch !== "string") {
+      throw new Error("Branch name is required");
+    }
+
+    if (branch.startsWith("-") || branch.includes("..")) {
+      throw new Error("Invalid branch name");
+    }
+
+    const isValid = /^[A-Za-z0-9._/\-]+$/.test(branch);
+    if (!isValid) {
+      throw new Error("Invalid branch name");
+    }
+  }
+
+  static buildGitAuthHeader(token) {
+    if (!token) {
+      return null;
+    }
+    const basicToken = Buffer.from(`x-access-token:${token}`).toString("base64");
+    return `AUTHORIZATION: basic ${basicToken}`;
+  }
+
+  static runGit(args, options = {}) {
+    return new Promise((resolve, reject) => {
+      execFile("git", args, { ...options, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          error.stdout = stdout;
+          error.stderr = stderr;
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
   }
 
   /**
@@ -148,15 +197,15 @@ export class GitHubService {
 
       // Use custom token if provided, otherwise fall back to OAuth token
       const token = customToken || this.accessToken;
+      const cloneUrl = GitHubService.sanitizeGithubUrl(repoUrl);
 
-      // Insert access token into clone URL for private repos
-      const cloneUrl = token
-        ? repoUrl.replace("https://", `https://${token}@`)
-        : repoUrl;
-
-      // Clone repository
-      const command = `git clone "${cloneUrl}" "${destinationPath}"`;
-      await execAsync(command);
+      const cloneArgs = [];
+      const authHeader = GitHubService.buildGitAuthHeader(token);
+      if (authHeader) {
+        cloneArgs.push("-c", `http.extraheader=${authHeader}`);
+      }
+      cloneArgs.push("clone", cloneUrl, destinationPath);
+      await GitHubService.runGit(cloneArgs);
 
       logger.info(`Cloned repository to: ${destinationPath}${customToken ? ' (using custom PAT)' : ''}`);
       return destinationPath;
@@ -203,10 +252,8 @@ export class GitHubService {
    */
   async pushToRepo(localPath, repoUrl, branch = "main") {
     try {
-      // Insert access token into repo URL
-      const authRepoUrl = this.accessToken
-        ? repoUrl.replace("https://", `https://${this.accessToken}@`)
-        : repoUrl;
+      const targetRepoUrl = GitHubService.sanitizeGithubUrl(repoUrl);
+      GitHubService.validateBranchName(branch);
 
       // Remove any existing .git directory to ensure fresh repository
       const gitDir = path.join(localPath, ".git");
@@ -222,44 +269,47 @@ export class GitHubService {
         GIT_CEILING_DIRECTORIES: path.dirname(localPath),
       };
 
-      await execAsync("git init --initial-branch=main", {
+      await GitHubService.runGit(["init", "--initial-branch=main"], {
         cwd: localPath,
         env: gitEnv,
       });
       logger.info("Initialized fresh git repository");
 
       // Configure git user (use GitHub's noreply email)
-      await execAsync(
-        'git config user.email "frameshift@users.noreply.github.com"',
-        { cwd: localPath }
-      );
-      await execAsync('git config user.name "FrameShift"', { cwd: localPath });
+      await GitHubService.runGit(["config", "user.email", "frameshift@users.noreply.github.com"], { cwd: localPath });
+      await GitHubService.runGit(["config", "user.name", "FrameShift"], { cwd: localPath });
 
       // Add all files in the converted project directory ONLY
-      await execAsync("git add -A", { cwd: localPath });
+      await GitHubService.runGit(["add", "-A"], { cwd: localPath });
 
       // Commit changes
       const commitMessage =
         "Initial commit: Django to Flask conversion by FrameShift";
-      await execAsync(`git commit -m "${commitMessage}"`, { cwd: localPath });
+      await GitHubService.runGit(["commit", "-m", commitMessage], { cwd: localPath });
 
       // Set branch name
-      await execAsync(`git branch -M ${branch}`, { cwd: localPath });
+      await GitHubService.runGit(["branch", "-M", branch], { cwd: localPath });
 
       // Add remote
       try {
-        await execAsync(`git remote add origin "${authRepoUrl}"`, {
+        await GitHubService.runGit(["remote", "add", "origin", targetRepoUrl], {
           cwd: localPath,
         });
       } catch {
         // Remote might already exist, set URL instead
-        await execAsync(`git remote set-url origin "${authRepoUrl}"`, {
+        await GitHubService.runGit(["remote", "set-url", "origin", targetRepoUrl], {
           cwd: localPath,
         });
       }
 
       // Push to remote
-      await execAsync(`git push -u origin ${branch}`, { cwd: localPath });
+      const pushArgs = [];
+      const authHeader = GitHubService.buildGitAuthHeader(this.accessToken);
+      if (authHeader) {
+        pushArgs.push("-c", `http.extraheader=${authHeader}`);
+      }
+      pushArgs.push("push", "-u", "origin", branch);
+      await GitHubService.runGit(pushArgs, { cwd: localPath });
 
       logger.info(`Pushed to repository: ${repoUrl}`);
     } catch (error) {

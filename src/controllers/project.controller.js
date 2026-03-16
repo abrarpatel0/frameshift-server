@@ -5,6 +5,14 @@ import asyncHandler from '../utils/asyncHandler.js';
 import path from 'path';
 import logger from '../utils/logger.js';
 
+const toPositiveInt = (value, fallback, max = 100) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.min(parsed, max);
+};
+
 /**
  * Upload project (ZIP file)
  * POST /api/projects/upload
@@ -46,11 +54,13 @@ export const uploadProject = asyncHandler(async (req, res) => {
 
     // Get project size
     const size_bytes = await storageService.getDirectorySize(projectPath);
+    const requestedName = name || path.parse(file.originalname).name;
+    const uniqueName = await ProjectModel.generateUniqueActiveName(userId, requestedName);
 
     // Create project record
     const project = await ProjectModel.create({
       user_id: userId,
-      name: name || path.parse(file.originalname).name,
+      name: uniqueName,
       source_type: 'upload',
       file_path: projectPath,
       size_bytes
@@ -95,9 +105,12 @@ export const importFromGithub = asyncHandler(async (req, res) => {
   }
 
   // Create project record
+  const requestedName = name || path.basename(repoUrl, '.git');
+  const uniqueName = await ProjectModel.generateUniqueActiveName(userId, requestedName);
+
   const project = await ProjectModel.create({
     user_id: userId,
-    name: name || path.basename(repoUrl, '.git'),
+    name: uniqueName,
     description,
     source_type: 'github',
     source_url: repoUrl
@@ -120,8 +133,8 @@ export const importFromGithub = asyncHandler(async (req, res) => {
  */
 export const getUserProjects = asyncHandler(async (req, res) => {
   const { userId } = req.user;
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.pageSize) || 10;
+  const page = toPositiveInt(req.query.page, 1, 1000000);
+  const pageSize = toPositiveInt(req.query.pageSize, 10, 100);
 
   const result = await ProjectModel.getPaginated(userId, page, pageSize);
 
@@ -183,6 +196,15 @@ export const updateProject = asyncHandler(async (req, res) => {
   const updateData = {};
   if (name) updateData.name = name;
   if (description !== undefined) updateData.description = description;
+
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        message: 'No valid fields provided for update'
+      }
+    });
+  }
 
   const project = await ProjectModel.update(id, updateData);
 

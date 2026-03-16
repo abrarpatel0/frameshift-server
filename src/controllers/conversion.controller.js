@@ -6,8 +6,22 @@ import storageService from '../services/storage.service.js';
 import { broadcastConversionComplete, broadcastConversionFailed } from '../services/websocket.service.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import logger from '../utils/logger.js';
+import { encrypt } from '../utils/encryption.js';
+import {
+  normalizeConversionMode,
+  validateAndSanitizeCustomApiConfig,
+  sanitizeCustomApiConfigForResponse
+} from '../utils/customApiConfig.js';
 import path from 'path';
 import fs from 'fs/promises';
+
+const toPositiveInt = (value, fallback, max = 100) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.min(parsed, max);
+};
 
 /**
  * Start new conversion
@@ -15,7 +29,12 @@ import fs from 'fs/promises';
  */
 export const startConversion = asyncHandler(async (req, res) => {
   const { userId } = req.user;
-  const { projectId, use_ai = true } = req.body; // Extract use_ai from request
+  const {
+    projectId,
+    use_ai = true,
+    conversion_mode: rawConversionMode,
+    custom_api_config: rawCustomApiConfig
+  } = req.body;
 
   if (!projectId) {
     return res.status(400).json({
@@ -48,19 +67,60 @@ export const startConversion = asyncHandler(async (req, res) => {
     });
   }
 
+  const conversionMode = normalizeConversionMode(rawConversionMode);
+  let customApiConfig = null;
+
+  if (conversionMode === 'custom') {
+    const validation = validateAndSanitizeCustomApiConfig(rawCustomApiConfig);
+    if (!validation.valid) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: validation.error
+        }
+      });
+    }
+
+    try {
+      customApiConfig = {
+        ...validation.config,
+        api_key: encrypt(validation.config.api_key)
+      };
+    } catch (error) {
+      logger.error('Failed to encrypt custom API key:', error);
+      return res.status(500).json({
+        success: false,
+        error: {
+          message: 'Custom API configuration is temporarily unavailable.'
+        }
+      });
+    }
+  }
+
   // Create conversion job with AI flag
   const job = await ConversionJobModel.create({
     project_id: projectId,
     user_id: userId,
     status: 'pending',
     progress_percentage: 0,
-    use_ai: use_ai
+    use_ai: use_ai,
+    conversion_mode: conversionMode,
+    custom_api_config: customApiConfig
   });
 
-  logger.info(`Conversion job created: ${job.id} for project ${projectId} (AI: ${use_ai ? 'enabled' : 'disabled'})`);
+  logger.info(
+    `Conversion job created: ${job.id} for project ${projectId} (AI: ${use_ai ? 'enabled' : 'disabled'}, mode: ${conversionMode})`
+  );
 
   // Start conversion asynchronously with AI flag
-  ConversionService.startConversion(job.id, project.file_path, userId, use_ai)
+  ConversionService.startConversion(
+    job.id,
+    project.file_path,
+    userId,
+    use_ai,
+    job.conversion_mode,
+    job.custom_api_config
+  )
     .then(result => {
       // Broadcast completion
       broadcastConversionComplete(userId, job.id, result);
@@ -81,6 +141,8 @@ export const startConversion = asyncHandler(async (req, res) => {
         projectId: job.project_id,
         status: job.status,
         progress: job.progress_percentage,
+        conversionMode: job.conversion_mode || 'default',
+        customApiConfig: sanitizeCustomApiConfigForResponse(job.custom_api_config),
         createdAt: job.created_at
       }
     },
@@ -107,9 +169,12 @@ export const getConversionStatus = asyncHandler(async (req, res) => {
     });
   }
 
+  const project = await ProjectModel.findById(job.project_id);
+
   res.json({
     success: true,
     data: {
+      project_name: project?.name || null,
       job: {
         id: job.id,
         projectId: job.project_id,
@@ -117,6 +182,8 @@ export const getConversionStatus = asyncHandler(async (req, res) => {
         progress: job.progress_percentage,
         currentStep: job.current_step,
         error: job.error_message,
+        conversionMode: job.conversion_mode || 'default',
+        customApiConfig: sanitizeCustomApiConfigForResponse(job.custom_api_config),
         startedAt: job.started_at,
         completedAt: job.completed_at,
         createdAt: job.created_at
@@ -131,8 +198,8 @@ export const getConversionStatus = asyncHandler(async (req, res) => {
  */
 export const getUserConversions = asyncHandler(async (req, res) => {
   const { userId } = req.user;
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.pageSize) || 10;
+  const page = toPositiveInt(req.query.page, 1, 1000000);
+  const pageSize = toPositiveInt(req.query.pageSize, 10, 100);
   const status = req.query.status || null;
 
   const offset = (page - 1) * pageSize;
@@ -142,13 +209,18 @@ export const getUserConversions = asyncHandler(async (req, res) => {
     offset,
     status
   });
+  const safeJobs = jobs.map((job) => ({
+    ...job,
+    conversion_mode: job.conversion_mode || 'default',
+    custom_api_config: sanitizeCustomApiConfigForResponse(job.custom_api_config)
+  }));
 
   const total = await ConversionJobModel.countByUserId(userId, status);
 
   res.json({
     success: true,
     data: {
-      jobs,
+      jobs: safeJobs,
       pagination: {
         page,
         pageSize,
@@ -344,7 +416,14 @@ export const retryConversion = asyncHandler(async (req, res) => {
   logger.info(`Retrying conversion job ${id} (attempt ${updatedJob.retry_count})`);
 
   // Start conversion asynchronously
-  ConversionService.startConversion(id, project.file_path, userId)
+  ConversionService.startConversion(
+    id,
+    project.file_path,
+    userId,
+    updatedJob.use_ai,
+    updatedJob.conversion_mode,
+    updatedJob.custom_api_config
+  )
     .then(result => {
       broadcastConversionComplete(userId, id, result);
       logger.info(`Retry conversion job ${id} completed successfully`);
@@ -358,7 +437,11 @@ export const retryConversion = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      job: updatedJob
+      job: {
+        ...updatedJob,
+        conversion_mode: updatedJob.conversion_mode || 'default',
+        custom_api_config: sanitizeCustomApiConfigForResponse(updatedJob.custom_api_config)
+      }
     },
     message: `Conversion retry started (attempt ${updatedJob.retry_count}/${MAX_RETRIES})`
   });
@@ -399,7 +482,11 @@ export const getConversionReport = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      report
+      report: {
+        ...report,
+        conversion_mode: job.conversion_mode || 'default',
+        custom_api_config: sanitizeCustomApiConfigForResponse(job.custom_api_config)
+      }
     }
   });
 });

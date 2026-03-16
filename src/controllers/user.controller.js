@@ -1,7 +1,16 @@
 import UserModel from '../models/user.model.js';
 import ProjectModel from '../models/project.model.js';
+import { query } from '../config/database.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import logger from '../utils/logger.js';
+
+const toPositiveInt = (value, fallback, max = 100) => {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.min(parsed, max);
+};
 
 /**
  * Get current user profile
@@ -54,6 +63,15 @@ export const updateUserProfile = asyncHandler(async (req, res) => {
     updateData.email_verified = false; // Reset verification if email changes
   }
 
+  if (Object.keys(updateData).length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: {
+        message: 'No valid fields provided for update'
+      }
+    });
+  }
+
   const user = await UserModel.update(userId, updateData);
 
   logger.info(`User profile updated: ${userId}`);
@@ -90,8 +108,8 @@ export const deleteUserAccount = asyncHandler(async (req, res) => {
  */
 export const getUserProjects = asyncHandler(async (req, res) => {
   const { userId } = req.user;
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.pageSize) || 10;
+  const page = toPositiveInt(req.query.page, 1, 1000000);
+  const pageSize = toPositiveInt(req.query.pageSize, 10, 100);
 
   const result = await ProjectModel.getPaginated(userId, page, pageSize);
 
@@ -107,8 +125,8 @@ export const getUserProjects = asyncHandler(async (req, res) => {
  */
 export const getUserConversions = asyncHandler(async (req, res) => {
   const { userId } = req.user;
-  const page = parseInt(req.query.page) || 1;
-  const pageSize = parseInt(req.query.pageSize) || 10;
+  const page = toPositiveInt(req.query.page, 1, 1000000);
+  const pageSize = toPositiveInt(req.query.pageSize, 10, 100);
   const status = req.query.status || null;
 
   const offset = (page - 1) * pageSize;
@@ -187,7 +205,11 @@ export const getUserStats = asyncHandler(async (req, res) => {
   const totalConversions = await ConversionJobModel.countByUserId(userId);
   const completedConversions = await ConversionJobModel.countByUserId(userId, 'completed');
   const failedConversions = await ConversionJobModel.countByUserId(userId, 'failed');
-  const inProgressConversions = await ConversionJobModel.countByUserId(userId, 'processing');
+  const inProgressResult = await query(
+    "SELECT COUNT(*) FROM conversion_jobs WHERE user_id = $1 AND status IN ('pending', 'analyzing', 'converting', 'verifying')",
+    [userId]
+  );
+  const inProgressConversions = parseInt(inProgressResult.rows[0].count, 10);
 
   res.json({
     success: true,

@@ -13,9 +13,11 @@ from ..utils.logger import logger
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
-except ImportError:
+except Exception as exc:
     GEMINI_AVAILABLE = False
-    logger.warning("google-generativeai not installed. AI verification will be disabled.")
+    genai = None
+    _GEMINI_IMPORT_ERROR = str(exc)
+    logger.warning(f"google-generativeai unavailable. AI verification disabled. Reason: {_GEMINI_IMPORT_ERROR}")
 
 
 class GeminiVerifier:
@@ -42,7 +44,8 @@ class GeminiVerifier:
                 self.enabled = False
         else:
             if not GEMINI_AVAILABLE:
-                logger.warning("Gemini AI not available: google-generativeai package not installed")
+                reason = _GEMINI_IMPORT_ERROR if '_GEMINI_IMPORT_ERROR' in globals() else 'google-generativeai package not installed'
+                logger.warning(f"Gemini AI not available: {reason}")
             elif not self.api_key:
                 logger.warning("Gemini AI not available: API key not provided")
 

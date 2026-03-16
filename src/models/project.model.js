@@ -11,6 +11,53 @@ const VALID_UPDATE_COLUMNS = [
 
 export class ProjectModel {
   /**
+   * Check whether an active project name is already in use by a user
+   * @param {string} userId - User ID
+   * @param {string} name - Project name
+   * @returns {Promise<boolean>} True if name exists
+   */
+  static async activeNameExists(userId, name) {
+    const result = await query(
+      `SELECT 1
+       FROM projects
+       WHERE user_id = $1 AND name = $2 AND deleted_at IS NULL
+       LIMIT 1`,
+      [userId, name]
+    );
+
+    return result.rowCount > 0;
+  }
+
+  /**
+   * Generate a unique active project name for a user
+   * Example: "my-app", "my-app-2", "my-app-3"
+   * @param {string} userId - User ID
+   * @param {string} baseName - Requested project name
+   * @returns {Promise<string>} Unique project name
+   */
+  static async generateUniqueActiveName(userId, baseName) {
+    const normalizedBase = (baseName || 'project').trim().slice(0, 240) || 'project';
+
+    if (!(await this.activeNameExists(userId, normalizedBase))) {
+      return normalizedBase;
+    }
+
+    let suffix = 2;
+    while (suffix < 1000) {
+      const candidate = `${normalizedBase}-${suffix}`;
+      // Keep within VARCHAR(255) limit
+      const boundedCandidate = candidate.length > 255 ? candidate.slice(0, 255) : candidate;
+
+      if (!(await this.activeNameExists(userId, boundedCandidate))) {
+        return boundedCandidate;
+      }
+      suffix += 1;
+    }
+
+    throw new Error('Unable to generate a unique project name. Please choose a different name.');
+  }
+
+  /**
    * Create a new project
    * @param {Object} projectData - Project data
    * @returns {Promise<Object>} Created project
@@ -100,6 +147,12 @@ export class ProjectModel {
    * @returns {Promise<Object>} Updated project
    */
   static async update(id, updateData) {
+    if (!updateData || Object.keys(updateData).length === 0) {
+      const error = new Error('No valid fields provided for project update');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const fields = [];
     const values = [];
     let paramIndex = 1;

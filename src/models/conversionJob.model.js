@@ -7,6 +7,7 @@ import { query } from '../config/database.js';
 const VALID_UPDATE_COLUMNS = [
   'status', 'progress_percentage', 'current_step', 'converted_file_path',
   'error_message', 'started_at', 'completed_at', 'use_ai', 'ai_enhancements',
+  'conversion_mode', 'custom_api_config',
   'retry_count', 'last_retry_at', 'updated_at'
 ];
 
@@ -26,14 +27,31 @@ export class ConversionJobModel {
       converted_file_path = null,
       error_message = null,
       use_ai = true,
-      ai_enhancements = []
+      ai_enhancements = [],
+      conversion_mode = 'default',
+      custom_api_config = null
     } = jobData;
 
     const result = await query(
-      `INSERT INTO conversion_jobs (project_id, user_id, status, progress_percentage, current_step, converted_file_path, error_message, use_ai, ai_enhancements)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO conversion_jobs (
+        project_id, user_id, status, progress_percentage, current_step, converted_file_path,
+        error_message, use_ai, ai_enhancements, conversion_mode, custom_api_config
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [project_id, user_id, status, progress_percentage, current_step, converted_file_path, error_message, use_ai, ai_enhancements]
+      [
+        project_id,
+        user_id,
+        status,
+        progress_percentage,
+        current_step,
+        converted_file_path,
+        error_message,
+        use_ai,
+        ai_enhancements,
+        conversion_mode,
+        custom_api_config ? JSON.stringify(custom_api_config) : null
+      ]
     );
 
     return result.rows[0];
@@ -108,6 +126,12 @@ export class ConversionJobModel {
    * @returns {Promise<Object>} Updated conversion job
    */
   static async update(id, updateData) {
+    if (!updateData || Object.keys(updateData).length === 0) {
+      const error = new Error('No valid fields provided for conversion job update');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const fields = [];
     const values = [];
     let paramIndex = 1;
@@ -116,8 +140,13 @@ export class ConversionJobModel {
       if (!VALID_UPDATE_COLUMNS.includes(key)) {
         throw new Error(`Invalid update column: ${key}`);
       }
-      fields.push(`${key} = $${paramIndex}`);
-      values.push(value);
+      if (key === 'custom_api_config') {
+        fields.push(`${key} = $${paramIndex}`);
+        values.push(value ? JSON.stringify(value) : null);
+      } else {
+        fields.push(`${key} = $${paramIndex}`);
+        values.push(value);
+      }
       paramIndex++;
     });
 
@@ -142,13 +171,39 @@ export class ConversionJobModel {
   static async updateProgress(id, percentage, step) {
     const result = await query(
       `UPDATE conversion_jobs
-       SET progress_percentage = $1, current_step = $2, updated_at = CURRENT_TIMESTAMP
+       SET progress_percentage = GREATEST(progress_percentage, $1),
+           current_step = CASE
+             WHEN $1 >= progress_percentage THEN $2
+             ELSE current_step
+           END,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = $3
+         AND status NOT IN ('completed', 'failed')
        RETURNING *`,
       [percentage, step, id]
     );
 
     return result.rows[0];
+  }
+
+  /**
+   * Mark in-progress jobs as failed (used on server restart recovery)
+   * @param {string} reason - Failure reason
+   * @returns {Promise<number>} Number of jobs updated
+   */
+  static async failOrphanedInProgressJobs(reason = 'Conversion interrupted by server restart') {
+    const result = await query(
+      `UPDATE conversion_jobs
+       SET status = 'failed',
+           error_message = $1,
+           completed_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE status IN ('analyzing', 'converting', 'verifying')
+         AND completed_at IS NULL`,
+      [reason]
+    );
+
+    return result.rowCount || 0;
   }
 
   /**

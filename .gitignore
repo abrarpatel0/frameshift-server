@@ -1,61 +1,50 @@
-# Dependencies
-node_modules/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Environment variables
-.env
-
-# Logs
-logs/
+# logs
+logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Storage (user uploads and generated files)
-storage/
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-test_django_project/
-test_output/
-# OS
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# Dependency directories
+node_modules/
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# dotenv environment variables file
+.env
+.env.test
+.env.production
+.env.development
+.env.local
+
+# Server execution and temp data
+temp/
+tmp/
+storage/projects/*
+!storage/projects/.gitkeep
+
+# Mac OS folder attributes
 .DS_Store
-Thumbs.db
 
-# IDE
-.vscode/
+# IDEs and editors
 .idea/
+.vscode/
 *.swp
 *.swo
-*~
-
-# Testing
-coverage/
-.nyc_output/
-
-# Build
-dist/
-build/
-
-# Temporary files
-*.tmp
-*.temp
-.claude/settings.local.json
-FRONTEND_PROMPT.md
-COPY_PASTE_PROMPT.txt
-fix-python.md
-CONVERSION_SUCCESS.md
-SIMPLE_FRONTEND_PROMPT.txt
-TEST_CONVERSION.md
-WINDOWS_SETUP.md
-test_conversion_api.js
-test_github_push.js
-test_conversion_quality.py

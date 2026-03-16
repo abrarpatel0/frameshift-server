@@ -163,6 +163,16 @@ const sendQueuedMessages = (userId, ws) => {
  * @param {WebSocket} ws - WebSocket connection
  */
 export const registerClient = (userId, ws) => {
+  const existingClient = clients.get(userId);
+  if (existingClient && existingClient !== ws) {
+    try {
+      // Replace stale/duplicate connection for the same user
+      existingClient.close(1000, 'Replaced by a newer connection');
+    } catch (error) {
+      logger.debug(`Failed to close existing WebSocket for user ${userId}: ${error.message}`);
+    }
+  }
+
   clients.set(userId, ws);
   logger.info(`WebSocket client registered: ${userId}`);
 
@@ -174,9 +184,20 @@ export const registerClient = (userId, ws) => {
  * Unregister WebSocket client
  * @param {string} userId - User ID
  */
-export const unregisterClient = (userId) => {
-  clients.delete(userId);
-  logger.info(`WebSocket client unregistered: ${userId}`);
+export const unregisterClient = (userId, ws = null) => {
+  const currentClient = clients.get(userId);
+
+  // If a socket is provided, only unregister when it is the active socket
+  if (ws && currentClient && currentClient !== ws) {
+    return false;
+  }
+
+  const removed = clients.delete(userId);
+  if (removed) {
+    logger.info(`WebSocket client unregistered: ${userId}`);
+  }
+
+  return removed;
 };
 
 /**
@@ -228,6 +249,7 @@ export const broadcastProgress = async (jobId, progressData) => {
       progress: progressData.progress,
       step: progressData.step,
       message: progressData.message,
+      conversion_mode: job.conversion_mode || 'default',
       timestamp: Date.now()
     };
 
@@ -244,14 +266,29 @@ export const broadcastProgress = async (jobId, progressData) => {
  * @param {Object} result - Conversion result
  */
 export const broadcastConversionComplete = (userId, jobId, result) => {
-  const message = {
-    type: 'conversion:completed',
-    jobId,
-    result,
-    timestamp: Date.now()
-  };
+  import('../models/conversionJob.model.js')
+    .then(({ default: ConversionJobModel }) => ConversionJobModel.findById(jobId))
+    .then((job) => {
+      const message = {
+        type: 'conversion:completed',
+        jobId,
+        result,
+        conversion_mode: job?.conversion_mode || 'default',
+        timestamp: Date.now()
+      };
 
-  broadcastToUser(userId, message);
+      broadcastToUser(userId, message);
+    })
+    .catch((error) => {
+      logger.error(`Failed to include conversion mode in completion message for job ${jobId}:`, error);
+      broadcastToUser(userId, {
+        type: 'conversion:completed',
+        jobId,
+        result,
+        conversion_mode: 'default',
+        timestamp: Date.now()
+      });
+    });
 };
 
 /**
@@ -261,14 +298,29 @@ export const broadcastConversionComplete = (userId, jobId, result) => {
  * @param {string} error - Error message
  */
 export const broadcastConversionFailed = (userId, jobId, error) => {
-  const message = {
-    type: 'conversion:failed',
-    jobId,
-    error,
-    timestamp: Date.now()
-  };
+  import('../models/conversionJob.model.js')
+    .then(({ default: ConversionJobModel }) => ConversionJobModel.findById(jobId))
+    .then((job) => {
+      const message = {
+        type: 'conversion:failed',
+        jobId,
+        error,
+        conversion_mode: job?.conversion_mode || 'default',
+        timestamp: Date.now()
+      };
 
-  broadcastToUser(userId, message);
+      broadcastToUser(userId, message);
+    })
+    .catch((lookupError) => {
+      logger.error(`Failed to include conversion mode in failure message for job ${jobId}:`, lookupError);
+      broadcastToUser(userId, {
+        type: 'conversion:failed',
+        jobId,
+        error,
+        conversion_mode: 'default',
+        timestamp: Date.now()
+      });
+    });
 };
 
 /**
